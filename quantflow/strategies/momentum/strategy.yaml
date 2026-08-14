@@ -1,0 +1,6 @@
+name: "SimpleMomentum"
+version: "1.0.0"
+min_framework_version: "0.1.0"
+entry_point: "quantflow.strategies.momentum.strategy.SimpleMomentumStrategy"
+description: "N-period return momentum strategy emitting BUY/SELL signals"
+author: "QuantFlow Team"

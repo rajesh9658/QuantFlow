@@ -1,0 +1,6 @@
+name: "ExampleStrategy"
+version: "0.1.0"
+min_framework_version: "0.1.0"
+entry_point: "quantflow.strategies._example.ExampleStrategy"
+description: "No-op example strategy plugin for testing plugin loader end-to-end"
+author: "QuantFlow Team"

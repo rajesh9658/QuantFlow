@@ -1,0 +1,1 @@
+"""Simple Momentum strategy plugin."""

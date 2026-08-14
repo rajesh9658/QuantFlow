@@ -1,0 +1,19 @@
+# QuantFlow Example Configuration File
+
+environment: "development"
+log_level: "INFO"
+
+event_bus:
+  max_queue_size: 1000
+
+database:
+  host: "localhost"
+  port: 5432
+  name: "quantflow_db"
+  user: "quantflow"
+
+market_data:
+  exchange: "BINANCE"
+  symbols:
+    - "BTC-USD"
+    - "ETH-USD"
