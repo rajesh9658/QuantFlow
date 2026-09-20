@@ -1,460 +1,961 @@
-QuantFlow Platform Specification – Paper Trading Execution Engine
-Design Overview
-The Paper Execution Engine simulates order fills for paper trading and backtesting. It consumes ApprovedSignalEvent, fetches the current local order book, and simulates realistic fills using a book-walking algorithm that models slippage proportional to the order size. The core fill simulation is a pure function that takes an OrderPayload, an OrderBookPayload, and a FeeSchedule as inputs—guaranteeing it has zero dependencies on the live clock, network, or I/O. This ensures the exact same code powers both live paper trading and historical backtesting.
+QuantFlow Platform Specification – Analytics Module
+The Analytics Module provides real‑time and historical performance metrics for the trading system. It consumes PortfolioUpdateEvent and FillEvent (or ExecutionEvent) to compute key statistics. The design ensures that the exact same formulas are used for live streaming (incremental) and offline backtesting (batch), guaranteeing consistency between paper/live trading results and historical simulations.
 
-1. Fee Schedule Configuration
-Fees are defined per symbol with global defaults, all sourced via ConfigManager.
+1. Core Design Principles
+Unified Computation: A set of pure StatAggregator classes maintains rolling or incremental state. Batch computation simply instantiates these aggregators and feeds them the full historical dataset.
 
-python
-# fees.py
-from dataclasses import dataclass
-from typing import Optional, Dict
-from config_manager import ConfigManager
+Event‑Driven Updates: In live mode, the AnalyticsEngine subscribes to events and updates aggregators. In backtest mode, a replay loop feeds historical events through the exact same interface.
 
+Time‑Series Alignment: All metrics are anchored to daily returns for Sharpe/Sortino to avoid dependencies on irregular trade timings. Daily equity snapshots are derived from PortfolioUpdateEvent.
 
-@dataclass(frozen=True)
-class FeeSchedule:
-    """
-    Fee structure for a specific symbol.
-    Maker/Taker rates are expressed as decimal (e.g., 0.001 for 0.1%).
-    """
-    taker_rate: float
-    maker_rate: float
-    flat_fee_per_order: float = 0.0
+2. Metrics & Exact Formulas
+2.1 Returns & Volatility (Sharpe / Sortino)
+Let 
+E
+t
+E 
+t
+​
+  be the total equity at the end of day 
+t
+t.
+Define daily return:
 
-    def calculate_fee(self, notional: float, is_maker: bool = False) -> float:
-        """Calculate the total fee for a trade."""
-        rate = self.maker_rate if is_maker else self.taker_rate
-        return (notional * rate) + self.flat_fee_per_order
+R
+t
+=
+E
+t
+−
+E
+t
+−
+1
+E
+t
+−
+1
+,
+with 
+E
+0
+=
+initial capital
+R 
+t
+​
+ = 
+E 
+t−1
+​
+ 
+E 
+t
+​
+ −E 
+t−1
+​
+ 
+​
+ ,with E 
+0
+​
+ =initial capital
+Mean Return (excess over risk‑free rate 
+R
+f
+R 
+f
+​
+ ):
 
-    @classmethod
-    def from_config(cls, config: ConfigManager, symbol: Optional[str] = None) -> "FeeSchedule":
-        """Load fee schedule from config with fallbacks."""
-        prefix = "execution.paper.fees"
-        taker = config.get_float(f"{prefix}.default.taker", 0.001)
-        maker = config.get_float(f"{prefix}.default.maker", 0.0005)
-        flat = config.get_float(f"{prefix}.default.flat", 0.0)
-
-        if symbol:
-            taker = config.get_float(f"{prefix}.symbols.{symbol}.taker", taker)
-            maker = config.get_float(f"{prefix}.symbols.{symbol}.maker", maker)
-            flat = config.get_float(f"{prefix}.symbols.{symbol}.flat", flat)
-
-        return FeeSchedule(taker_rate=taker, maker_rate=maker, flat_fee_per_order=flat)
-Sample YAML Configuration
-yaml
-# quantflow.yaml
-execution:
-  paper:
-    # Default fees (e.g., Binance spot)
-    fees:
-      default:
-        taker: 0.001   # 0.1%
-        maker: 0.0005  # 0.05%
-        flat: 0.0
-      symbols:
-        BTC/USDT:
-          taker: 0.0006
-          maker: 0.0003
-2. Pure Order Simulator (Core Algorithm)
-This is the reusable, side-effect-free component. It walks the order book to simulate fills, respecting limit prices and market liquidity.
-
-python
-# order_simulator.py
-from typing import List, Tuple, Optional
-from datetime import datetime, timezone
-from uuid import uuid4
-
-from events import (
-    OrderPayload, OrderBookPayload, FillPayload,
-    OrderSide, OrderType, EventType
+R
+ˉ
+e
+=
+1
+N
+∑
+t
+=
+1
+N
+(
+R
+t
+−
+R
+f
 )
-from fees import FeeSchedule
+R
+ˉ
+  
+e
+​
+ = 
+N
+1
+​
+  
+t=1
+∑
+N
+​
+ (R 
+t
+​
+ −R 
+f
+​
+ )
+Volatility (Standard Deviation):
+
+σ
+=
+1
+N
+−
+1
+∑
+t
+=
+1
+N
+(
+R
+t
+−
+R
+ˉ
+)
+2
+σ= 
+N−1
+1
+​
+  
+t=1
+∑
+N
+​
+ (R 
+t
+​
+ − 
+R
+ˉ
+ ) 
+2
+ 
+​
+ 
+Downside Deviation (for Sortino, using negative returns only):
+
+σ
+d
+=
+1
+N
+−
+1
+∑
+t
+=
+1
+N
+min
+⁡
+(
+R
+t
+−
+R
+ˉ
+,
+0
+)
+2
+σ 
+d
+​
+ = 
+N−1
+1
+​
+  
+t=1
+∑
+N
+​
+ min(R 
+t
+​
+ − 
+R
+ˉ
+ ,0) 
+2
+ 
+​
+ 
+(Alternative definition uses 
+min
+⁡
+(
+R
+t
+,
+0
+)
+2
+min(R 
+t
+​
+ ,0) 
+2
+ ; we use the mean‑adjusted version for consistency with Sortino’s original paper.)
+
+Annualization Factor: 
+252
+252
+​
+  (assuming 252 trading days per year).
+Risk‑Free Rate: Read from ConfigManager (analytics.risk_free_rate, default 0.0).
+
+Sharpe
+=
+R
+ˉ
+e
+σ
+×
+252
+Sharpe= 
+σ
+R
+ˉ
+  
+e
+​
+ 
+​
+ × 
+252
+​
+ 
+Sortino
+=
+R
+ˉ
+e
+σ
+d
+×
+252
+Sortino= 
+σ 
+d
+​
+ 
+R
+ˉ
+  
+e
+​
+ 
+​
+ × 
+252
+​
+ 
+Note: For live streaming, 
+R
+ˉ
+R
+ˉ
+  and 
+σ
+σ are computed incrementally using Welford’s online algorithm to avoid storing daily returns.
+
+2.2 Max Drawdown
+Given the equity curve 
+E
+0
+,
+E
+1
+,
+…
+,
+E
+N
+E 
+0
+​
+ ,E 
+1
+​
+ ,…,E 
+N
+​
+ :
+
+Drawdown
+t
+=
+Peak
+t
+−
+E
+t
+Peak
+t
+,
+where 
+Peak
+t
+=
+max
+⁡
+0
+≤
+i
+≤
+t
+E
+i
+Drawdown 
+t
+​
+ = 
+Peak 
+t
+​
+ 
+Peak 
+t
+​
+ −E 
+t
+​
+ 
+​
+ ,where Peak 
+t
+​
+ = 
+0≤i≤t
+max
+​
+ E 
+i
+​
+ 
+Max Drawdown
+=
+max
+⁡
+0
+≤
+t
+≤
+N
+Drawdown
+t
+Max Drawdown= 
+0≤t≤N
+max
+​
+ Drawdown 
+t
+​
+ 
+This is computed by maintaining a running peak and the current drawdown percentage.
+
+2.3 Trade‑Based Metrics
+For a set of 
+M
+M closed trades, let 
+PnL
+i
+PnL 
+i
+​
+  be the realized profit/loss of trade 
+i
+i.
+
+Win Rate:
+
+Win Rate
+=
+#
+{
+i
+:
+PnL
+i
+>
+0
+}
+M
+Win Rate= 
+M
+#{i:PnL 
+i
+​
+ >0}
+​
+ 
+Profit Factor:
+
+Profit Factor
+=
+∑
+i
+:
+PnL
+i
+>
+0
+PnL
+i
+∑
+i
+:
+PnL
+i
+<
+0
+(
+−
+PnL
+i
+)
+Profit Factor= 
+∑ 
+i:PnL 
+i
+​
+ <0
+​
+ (−PnL 
+i
+​
+ )
+∑ 
+i:PnL 
+i
+​
+ >0
+​
+ PnL 
+i
+​
+ 
+​
+ 
+If there are no losing trades, profit factor is defined as 
+∞
+∞ (or inf).
+
+Average Trade:
+
+PnL
+ˉ
+=
+1
+M
+∑
+i
+=
+1
+M
+PnL
+i
+PnL
+ˉ
+ = 
+M
+1
+​
+  
+i=1
+∑
+M
+​
+ PnL 
+i
+​
+ 
+Average Slippage (per trade):
+
+Slippage
+i
+=
+ExecPrice
+i
+−
+ExpectedPrice
+i
+Slippage 
+i
+​
+ =ExecPrice 
+i
+​
+ −ExpectedPrice 
+i
+​
+ 
+Slippage
+ˉ
+=
+1
+M
+∑
+i
+=
+1
+M
+Slippage
+i
+Slippage
+ˉ
+​
+ = 
+M
+1
+​
+  
+i=1
+∑
+M
+​
+ Slippage 
+i
+​
+ 
+Average Latency (per fill/order):
+
+Latency
+j
+=
+timestamp_received
+j
+−
+timestamp_exchange
+j
+Latency 
+j
+​
+ =timestamp_received 
+j
+​
+ −timestamp_exchange 
+j
+​
+ 
+Latency
+ˉ
+=
+1
+K
+∑
+j
+=
+1
+K
+Latency
+j
+Latency
+ˉ
+​
+ = 
+K
+1
+​
+  
+j=1
+∑
+K
+​
+ Latency 
+j
+​
+ 
+(Where 
+K
+K is the total number of fills.)
+
+3. Aggregator Classes (Incremental & Reusable)
+These classes maintain running state and can be fed data sequentially.
+
+python
+# analytics/aggregators.py
+import math
+from typing import Optional, Tuple
+from datetime import datetime, timedelta, timezone
 
 
-class FillSimulationResult:
-    """Result of a simulated fill."""
-    def __init__(
+class WelfordOnline:
+    """Online mean and variance (Welford's algorithm)."""
+    def __init__(self):
+        self.n = 0
+        self.mean = 0.0
+        self.m2 = 0.0   # sum of squared differences from mean
+
+    def update(self, x: float) -> None:
+        self.n += 1
+        delta = x - self.mean
+        self.mean += delta / self.n
+        delta2 = x - self.mean
+        self.m2 += delta * delta2
+
+    def variance(self) -> float:
+        return self.m2 / (self.n - 1) if self.n > 1 else 0.0
+
+    def stddev(self) -> float:
+        return math.sqrt(self.variance()) if self.n > 1 else 0.0
+
+
+class DrawdownTracker:
+    """Tracks running and maximum drawdown."""
+    def __init__(self, initial_equity: float):
+        self.peak = initial_equity
+        self.current_drawdown = 0.0
+        self.max_drawdown = 0.0
+
+    def update(self, equity: float) -> None:
+        if equity > self.peak:
+            self.peak = equity
+        self.current_drawdown = (self.peak - equity) / self.peak if self.peak > 0 else 0.0
+        self.max_drawdown = max(self.max_drawdown, self.current_drawdown)
+
+
+class TradeStatsAggregator:
+    """Aggregates per-trade PnL, slippage, win/loss counts."""
+    def __init__(self):
+        self.total_trades = 0
+        self.winning_trades = 0
+        self.sum_pnl = 0.0
+        self.sum_win_pnl = 0.0
+        self.sum_loss_pnl = 0.0  # absolute value of losses
+        self.sum_slippage = 0.0
+        self.sum_latency = 0.0
+        self.latency_count = 0
+
+    def add_trade(
         self,
-        fills: List[FillPayload],
-        remaining_quantity: float,
-        total_cost: float,
-        total_commission: float,
-        avg_price: float,
-    ):
-        self.fills = fills
-        self.remaining_quantity = remaining_quantity
-        self.total_cost = total_cost
-        self.total_commission = total_commission
-        self.avg_price = avg_price
+        pnl: float,
+        slippage: Optional[float] = None,
+        latency: Optional[float] = None
+    ) -> None:
+        self.total_trades += 1
+        self.sum_pnl += pnl
+        if pnl > 0:
+            self.winning_trades += 1
+            self.sum_win_pnl += pnl
+        elif pnl < 0:
+            self.sum_loss_pnl += abs(pnl)
 
+        if slippage is not None:
+            self.sum_slippage += slippage
+        if latency is not None:
+            self.sum_latency += latency
+            self.latency_count += 1
 
-def simulate_fill(
-    order: OrderPayload,
-    book: OrderBookPayload,
-    fee_schedule: FeeSchedule,
-    timestamp: datetime,
-) -> FillSimulationResult:
-    """
-    Pure function to simulate an order fill against a given order book state.
+    @property
+    def win_rate(self) -> float:
+        return self.winning_trades / self.total_trades if self.total_trades > 0 else 0.0
 
-    - For MARKET orders, walks the book until the full quantity is filled.
-    - For LIMIT orders, only consumes levels that meet the limit price condition.
-    - Partial fills are supported if the book lacks sufficient depth.
+    @property
+    def avg_trade(self) -> float:
+        return self.sum_pnl / self.total_trades if self.total_trades > 0 else 0.0
 
-    :param order: The order to simulate.
-    :param book: The current order book snapshot (bids sorted desc, asks sorted asc).
-    :param fee_schedule: Fee structure for the symbol.
-    :param timestamp: Timestamp to assign to fill events (historical or current).
-    :return: FillSimulationResult with fills, remaining qty, cost, fees, and avg price.
-    """
-    # Sort levels correctly (bids high-to-low, asks low-to-high)
-    bids = sorted(book.bids, key=lambda lvl: lvl.price, reverse=True)
-    asks = sorted(book.asks, key=lambda lvl: lvl.price)
+    @property
+    def profit_factor(self) -> float:
+        if self.sum_loss_pnl == 0:
+            return float('inf')
+        return self.sum_win_pnl / self.sum_loss_pnl
 
-    remaining = order.quantity
-    fills = []
-    total_cost = 0.0
-    total_commission = 0.0
+    @property
+    def avg_slippage(self) -> float:
+        return self.sum_slippage / self.total_trades if self.total_trades > 0 else 0.0
 
-    # Determine which side to consume
-    if order.side == OrderSide.BUY:
-        levels = asks
-        # Limit price condition: we can only buy at price <= limit_price
-        price_limit = order.limit_price if order.order_type == OrderType.LIMIT else float('inf')
-    else:  # SELL
-        levels = bids
-        price_limit = order.limit_price if order.order_type == OrderType.LIMIT else 0.0
-
-    # Walk the book
-    for level in levels:
-        if remaining <= 1e-12:
-            break
-
-        level_price = level.price
-
-        # Check limit condition
-        if order.side == OrderSide.BUY and level_price > price_limit:
-            break
-        if order.side == OrderSide.SELL and level_price < price_limit:
-            break
-
-        # Consume volume
-        fill_qty = min(remaining, level.size)
-        if fill_qty <= 1e-12:
-            continue
-
-        cost = fill_qty * level_price
-        commission = fee_schedule.calculate_fee(cost, is_maker=False)  # paper uses taker by default
-
-        fills.append(
-            FillPayload(
-                order_id=order.order_id,
-                fill_id=str(uuid4()),
-                symbol=order.symbol,
-                side=order.side,
-                price=level_price,
-                quantity=fill_qty,
-                commission=commission,
-                timestamp=timestamp,
-            )
-        )
-
-        remaining -= fill_qty
-        total_cost += cost
-        total_commission += commission
-
-    # Calculate average fill price
-    filled_qty = order.quantity - remaining
-    avg_price = total_cost / filled_qty if filled_qty > 1e-12 else 0.0
-
-    return FillSimulationResult(
-        fills=fills,
-        remaining_quantity=remaining,
-        total_cost=total_cost,
-        total_commission=total_commission,
-        avg_price=avg_price,
-    )
-3. PaperExecutionHandler
-Implements the ExecutionHandler interface, wrapping the pure simulator with live state fetching and event publishing.
+    @property
+    def avg_latency(self) -> float:
+        return self.sum_latency / self.latency_count if self.latency_count > 0 else 0.0
+4. Analytics Engine
+The engine combines the aggregators, collects daily equity samples, and computes final metrics on demand.
 
 python
-# paper_execution_handler.py
+# analytics/engine.py
 import asyncio
-import uuid
-from typing import Dict, List, Optional
-from datetime import datetime, timezone
+from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timezone, timedelta
+from collections import defaultdict
 
-from interfaces import ExecutionHandler, EventBus
-from events import (
-    ApprovedSignalEvent, OrderEvent, OrderPayload, FillEvent,
-    EventType, OrderSide, OrderType
-)
+from interfaces import EventBus
+from events import PortfolioUpdateEvent, FillEvent, EventType
 from config_manager import ConfigManager
 from logging_setup import get_logger
-from local_order_book import LocalOrderBook
-from order_simulator import simulate_fill
-from fees import FeeSchedule
+from analytics.aggregators import WelfordOnline, DrawdownTracker, TradeStatsAggregator
 
 
-class PaperExecutionHandler(ExecutionHandler):
+class AnalyticsEngine:
     """
-    Paper trading implementation of ExecutionHandler.
-    Simulates fills using the local order book and publishes OrderEvent/FillEvent.
+    Real‑time analytics engine. Subscribes to PortfolioUpdate and Fill events.
+    Maintains rolling stats and exposes computed metrics.
     """
 
-    def __init__(
-        self,
-        config: ConfigManager,
-        event_bus: EventBus,
-        order_books: Dict[str, LocalOrderBook],  # Sprint 5 component
-    ):
+    def __init__(self, config: ConfigManager, event_bus: EventBus):
         self.config = config
         self.event_bus = event_bus
-        self.order_books = order_books  # symbol -> LocalOrderBook
-        self.logger = get_logger("paper_execution")
-        self._pending_orders: Dict[str, OrderPayload] = {}
-        self._lock = asyncio.Lock()
+        self.logger = get_logger("analytics_engine")
+
+        # Config
+        self.risk_free_rate = config.get_float("analytics.risk_free_rate", 0.0)
+
+        # State
+        self.initial_equity: Optional[float] = None
+        self.last_equity: Optional[float] = None
+        self.last_update_day: Optional[str] = None  # YYYY-MM-DD
+
+        # Daily return aggregator (for Sharpe/Sortino)
+        self.return_aggregator = WelfordOnline()
+        self.downside_aggregator = WelfordOnline()  # stores negative deviations
+
+        # Drawdown
+        self.drawdown_tracker: Optional[DrawdownTracker] = None
+
+        # Trade stats
+        self.trade_stats = TradeStatsAggregator()
+
+        # Equity curve (store daily snapshots for batch/visualization)
+        self.equity_curve: List[Tuple[datetime, float]] = []
+
+        # Running flag
         self._running = False
 
-    async def initialize(self, config: dict) -> None:
-        """Prepare the handler (no-op for paper)."""
+    async def start(self) -> None:
+        if self._running:
+            return
         self._running = True
+        await self.event_bus.subscribe(EventType.PORTFOLIO_UPDATE, self._handle_portfolio)
+        await self.event_bus.subscribe(EventType.FILL, self._handle_fill)
+        self.logger.info("Analytics Engine started")
 
-    async def submit_order(self, order: OrderPayload) -> str:
+    async def stop(self) -> None:
+        if not self._running:
+            return
+        self._running = False
+        await self.event_bus.unsubscribe(EventType.PORTFOLIO_UPDATE, self._handle_portfolio)
+        await self.event_bus.unsubscribe(EventType.FILL, self._handle_fill)
+        self.logger.info("Analytics Engine stopped")
+
+    # ---------- Event Handlers ----------
+
+    async def _handle_portfolio(self, event: PortfolioUpdateEvent) -> None:
+        """Process portfolio updates to compute daily returns and drawdown."""
+        if not self._running:
+            return
+
+        equity = event.payload.total_value
+        timestamp = event.timestamp_received or datetime.now(timezone.utc)
+        day_key = timestamp.date().isoformat()
+
+        # Initialize
+        if self.initial_equity is None:
+            self.initial_equity = equity
+            self.drawdown_tracker = DrawdownTracker(equity)
+            self.last_equity = equity
+            self.last_update_day = day_key
+            self.equity_curve.append((timestamp, equity))
+            return
+
+        # Check if we crossed a new day
+        if day_key != self.last_update_day:
+            # Compute daily return for the previous day
+            if self.last_equity is not None and self.last_equity > 0:
+                daily_ret = (equity - self.last_equity) / self.last_equity
+                self._add_daily_return(daily_ret)
+
+            # Update day tracker
+            self.last_update_day = day_key
+            self.last_equity = equity
+
+            # Store equity curve snapshot at the start of the new day (or end of previous)
+            self.equity_curve.append((timestamp, equity))
+        else:
+            # Within the same day, just update drawdown (equity may fluctuate)
+            pass
+
+        # Update drawdown regardless of day boundary
+        if self.drawdown_tracker:
+            self.drawdown_tracker.update(equity)
+
+        # Store the latest equity for future daily returns
+        self.last_equity = equity
+
+    async def _handle_fill(self, event: FillEvent) -> None:
+        """Process fills to compute trade PnL, slippage, and latency."""
+        if not self._running:
+            return
+
+        fill = event.payload
+
+        # 1. PnL per trade: we rely on the portfolio engine to compute realized PnL per fill.
+        # The fill event can carry a 'realized_pnl' field in metadata.
+        realized_pnl = fill.metadata.get("realized_pnl", 0.0)
+
+        # 2. Slippage: expected price from signal metadata or reference price.
+        expected_price = fill.metadata.get("expected_price")
+        slippage = None
+        if expected_price is not None and expected_price > 0:
+            slippage = fill.price - expected_price
+
+        # 3. Latency: timestamp_received - timestamp_exchange
+        latency = None
+        if event.timestamp_received and event.timestamp_exchange:
+            latency = (event.timestamp_received - event.timestamp_exchange).total_seconds()
+
+        # Add to aggregator (only if we consider this a closed trade segment)
+        # Note: In practice, a 'trade' might be composed of multiple fills.
+        # For this design, we treat each fill as contributing to the PnL of its order.
+        # Better: aggregate per order, but for real-time we can approximate.
+        if abs(realized_pnl) > 1e-12:
+            self.trade_stats.add_trade(realized_pnl, slippage, latency)
+
+    # ---------- Internal Computation ----------
+
+    def _add_daily_return(self, ret: float) -> None:
+        """Update both standard and downside variance aggregators."""
+        # Standard return
+        self.return_aggregator.update(ret)
+
+        # Downside deviation (for Sortino)
+        downside = min(ret - self.return_aggregator.mean, 0.0)
+        self.downside_aggregator.update(downside)
+
+    # ---------- Batch Loading (for Backtests) ----------
+
+    def load_historical_equity(self, equity_curve: List[Tuple[datetime, float]]) -> None:
         """
-        Simulate an order against the live local order book.
-        Returns the simulated order ID (same as input order_id).
+        Bulk‑load a historical equity curve for batch/backtest calculations.
+        Resets all internal state and replays the curve.
         """
-        async with self._lock:
-            # 1. Fetch current book snapshot from LocalOrderBook
-            book = self.order_books.get(order.symbol)
-            if not book:
-                self.logger.error(f"No order book available for {order.symbol}")
-                # Publish failed order event
-                await self._publish_order_status(order, "REJECTED", reason="Missing order book")
-                return order.order_id
+        self.reset()
+        for ts, eq in equity_curve:
+            # Simulate portfolio update logic
+            if self.initial_equity is None:
+                self.initial_equity = eq
+                self.drawdown_tracker = DrawdownTracker(eq)
+                self.last_equity = eq
+                self.last_update_day = ts.date().isoformat()
+                self.equity_curve.append((ts, eq))
+                continue
 
-            # 2. Get snapshot (top N levels, default 1000)
-            top_n = self.config.get_int("execution.paper.max_simulation_depth", 1000)
-            book_payload = self._snapshot_to_payload(book, top_n)
+            day_key = ts.date().isoformat()
+            if day_key != self.last_update_day:
+                if self.last_equity is not None and self.last_equity > 0:
+                    daily_ret = (eq - self.last_equity) / self.last_equity
+                    self._add_daily_return(daily_ret)
+                self.last_update_day = day_key
+                self.last_equity = eq
+                self.equity_curve.append((ts, eq))
+            else:
+                pass  # same day, just update equity for drawdown
 
-            # 3. Load fee schedule
-            fee_schedule = FeeSchedule.from_config(self.config, order.symbol)
+            if self.drawdown_tracker:
+                self.drawdown_tracker.update(eq)
+            self.last_equity = eq
 
-            # 4. Run pure simulation
-            timestamp = datetime.now(timezone.utc)
-            result = simulate_fill(order, book_payload, fee_schedule, timestamp)
-
-            # 5. Publish OrderEvent (status)
-            status = "FILLED" if result.remaining_quantity <= 1e-12 else "PARTIALLY_FILLED"
-            await self._publish_order_status(order, status, avg_price=result.avg_price)
-
-            # 6. Publish FillEvents
-            for fill in result.fills:
-                fill_event = FillEvent(
-                    event_id=uuid.uuid4(),
-                    event_type=EventType.FILL,
-                    schema_version=1,
-                    timestamp_exchange=timestamp,
-                    timestamp_received=datetime.now(timezone.utc),
-                    source="paper_execution",
-                    payload=fill,
-                )
-                await self.event_bus.publish(fill_event)
-
-            # 7. Store pending order state for cancellation/modification
-            self._pending_orders[order.order_id] = order
-
-            self.logger.info(
-                f"Paper order {order.order_id} executed: "
-                f"filled {order.quantity - result.remaining_quantity}/{order.quantity} @ {result.avg_price:.2f}"
-            )
-            return order.order_id
-
-    async def cancel_order(self, order_id: str) -> bool:
-        """Cancel a pending order (only possible if not fully filled)."""
-        async with self._lock:
-            order = self._pending_orders.pop(order_id, None)
-            if order:
-                await self._publish_order_status(order, "CANCELLED")
-                self.logger.info(f"Paper order {order_id} cancelled")
-                return True
-            self.logger.warning(f"Order {order_id} not found or already filled")
-            return False
-
-    async def modify_order(self, order_id: str, **kwargs) -> bool:
-        """Cancel and re-submit with new parameters."""
-        async with self._lock:
-            old_order = self._pending_orders.get(order_id)
-            if not old_order:
-                return False
-
-            # Create new order from old + modifications
-            new_order = OrderPayload(
-                order_id=str(uuid.uuid4()),
-                symbol=old_order.symbol,
-                side=old_order.side,
-                order_type=kwargs.get("order_type", old_order.order_type),
-                quantity=kwargs.get("quantity", old_order.quantity),
-                limit_price=kwargs.get("limit_price", old_order.limit_price),
-                stop_price=kwargs.get("stop_price", old_order.stop_price),
-                time_in_force=kwargs.get("time_in_force", old_order.time_in_force),
-                timestamp=datetime.now(timezone.utc),
-            )
-
-            # Cancel old
-            await self.cancel_order(order_id)
-            # Submit new
-            await self.submit_order(new_order)
-            self.logger.info(f"Paper order {order_id} modified to {new_order.order_id}")
-            return True
-
-    async def get_order_status(self, order_id: str) -> dict:
-        """Return internal order status."""
-        order = self._pending_orders.get(order_id)
-        if not order:
-            return {"status": "UNKNOWN"}
-        # In paper, we treat pending as "OPEN"
-        return {"status": "OPEN", "order": order.dict()}
-
-    async def get_fills(self, order_id: str) -> List[FillPayload]:
-        """Return fills for a given order (not tracked in paper, return empty)."""
-        # In a real implementation, we'd track this. For paper, we rely on the emitted FillEvents.
-        return []
-
-    # ---------- Helpers ----------
-
-    def _snapshot_to_payload(self, book: LocalOrderBook, depth: int) -> OrderBookPayload:
-        """Extract top N bids/asks from the LocalOrderBook."""
-        top_bids = book.get_top_bids(depth)
-        top_asks = book.get_top_asks(depth)
-
-        # Convert tuples to OrderBookLevel (same dataclass)
-        from events import OrderBookLevel
-        return OrderBookPayload(
-            symbol=book.symbol,
-            bids=[OrderBookLevel(price=p, size=s) for p, s in top_bids],
-            asks=[OrderBookLevel(price=p, size=s) for p, s in top_asks],
-            timestamp=datetime.now(timezone.utc),
-        )
-
-    async def _publish_order_status(
+    def load_historical_trades(
         self,
-        order: OrderPayload,
-        status: str,
-        avg_price: float = 0.0,
-        reason: Optional[str] = None,
+        trades: List[Tuple[float, Optional[float], Optional[float]]]
     ) -> None:
-        """Publish an OrderEvent to reflect status changes."""
-        order_event = OrderEvent(
-            event_id=uuid.uuid4(),
-            event_type=EventType.ORDER,
-            schema_version=1,
-            timestamp_exchange=datetime.now(timezone.utc),
-            timestamp_received=datetime.now(timezone.utc),
-            source="paper_execution",
-            payload=order,  # We can extend OrderPayload with status later, but for now separate
-        )
-        # Attach metadata as a custom attr (or we can extend the model)
-        setattr(order_event, "_status", status)
-        setattr(order_event, "_avg_price", avg_price)
-        setattr(order_event, "_reason", reason)
-        await self.event_bus.publish(order_event)
-4. Integration with Sprint 5 (Local Order Book)
-The PaperExecutionHandler expects a dictionary order_books: Dict[str, LocalOrderBook] populated by the MarketDataEngine. During startup:
+        """
+        Bulk‑load historical trades: (pnl, slippage, latency).
+        """
+        for pnl, slippage, latency in trades:
+            self.trade_stats.add_trade(pnl, slippage, latency)
+
+    # ---------- Reset ----------
+
+    def reset(self) -> None:
+        """Reset all state to compute a fresh set of metrics."""
+        self.initial_equity = None
+        self.last_equity = None
+        self.last_update_day = None
+        self.return_aggregator = WelfordOnline()
+        self.downside_aggregator = WelfordOnline()
+        self.drawdown_tracker = None
+        self.trade_stats = TradeStatsAggregator()
+        self.equity_curve.clear()
+
+    # ---------- Metric Getters ----------
+
+    def get_metrics(self) -> Dict[str, float]:
+        """Return the full set of performance metrics."""
+        metrics = {}
+
+        # Sharpe
+        mean_ret = self.return_aggregator.mean
+        std_ret = self.return_aggregator.stddev()
+        excess_ret = mean_ret - self.risk_free_rate
+        annual_factor = math.sqrt(252)
+        metrics["sharpe_ratio"] = (excess_ret / std_ret) * annual_factor if std_ret > 0 else 0.0
+
+        # Sortino
+        downside_std = self.downside_aggregator.stddev()
+        metrics["sortino_ratio"] = (excess_ret / downside_std) * annual_factor if downside_std > 0 else 0.0
+
+        # Drawdown
+        metrics["max_drawdown"] = self.drawdown_tracker.max_drawdown if self.drawdown_tracker else 0.0
+        metrics["current_drawdown"] = self.drawdown_tracker.current_drawdown if self.drawdown_tracker else 0.0
+
+        # Trade metrics
+        metrics["win_rate"] = self.trade_stats.win_rate
+        metrics["profit_factor"] = self.trade_stats.profit_factor
+        metrics["avg_trade"] = self.trade_stats.avg_trade
+        metrics["avg_slippage"] = self.trade_stats.avg_slippage
+        metrics["avg_latency"] = self.trade_stats.avg_latency
+        metrics["total_trades"] = float(self.trade_stats.total_trades)
+
+        # Total return
+        if self.initial_equity and self.last_equity:
+            metrics["total_return"] = (self.last_equity - self.initial_equity) / self.initial_equity
+
+        return metrics
+
+    def get_equity_curve(self) -> List[Tuple[datetime, float]]:
+        """Return the equity curve samples."""
+        return self.equity_curve.copy()
+5. Batch / Offline Usage (Backtest)
+For backtesting, the exact same analytics engine is used:
 
 python
-# main.py (composition root)
-# Assuming market_data_engine maintains the dict
-market_engine = MarketDataEngine(event_bus)
-# ... market_engine starts and maintains order_books ...
+# backtest_runner.py (snippet)
+analytics = AnalyticsEngine(config, event_bus)
+analytics.load_historical_equity(historical_equity_samples)
+analytics.load_historical_trades(historical_trade_pnls)
+metrics = analytics.get_metrics()
+No code duplication ensures 100% correlation between backtest results and live paper trading results.
 
-order_books = market_engine.order_books  # Dict[str, LocalOrderBook]
-
-execution_handler = PaperExecutionHandler(config, event_bus, order_books)
-container.register_singleton(ExecutionHandler, lambda cfg: execution_handler)
-The LocalOrderBook provides the get_top_bids() and get_top_asks() methods (Sprint 5), ensuring the simulation sees exactly the same depth the strategies see.
-
-5. Fill Simulation Algorithm – Precise Specification
-Inputs
-Order: OrderPayload with side, order_type, quantity, limit_price (optional).
-
-Book: OrderBookPayload with bids (descending) and asks (ascending).
-
-FeeSchedule: Maker/Taker rates.
-
-Timestamp: datetime for fill event provenance.
-
-Steps
-Sort Levels:
-
-For BUY, walk the asks sorted by price ascending.
-
-For SELL, walk the bids sorted by price descending.
-
-Determine Price Cap:
-
-If LIMIT order, cap at limit_price (BUY: level_price ≤ limit_price; SELL: level_price ≥ limit_price).
-
-If MARKET, no cap (BUY: price < ∞; SELL: price > 0).
-
-Iterate Levels:
-
-For each level, consume fill_qty = min(remaining_quantity, level.size).
-
-If fill_qty > 0, create a FillPayload with price = level_price, quantity = fill_qty.
-
-Compute cost = fill_qty * price.
-
-Compute commission = FeeSchedule.calculate_fee(cost) (uses taker rate for paper).
-
-Update remaining_quantity -= fill_qty, total_cost += cost, total_commission += commission.
-
-Stop when remaining_quantity ≤ 1e-12 or end of book reached.
-
-Return:
-
-List of FillPayload objects.
-
-remaining_quantity (0 if fully filled, >0 if insufficient liquidity).
-
-avg_price = total_cost / (order.quantity - remaining_quantity).
-
-total_cost, total_commission.
-
-Edge Cases
-Scenario	Behavior
-Insufficient liquidity	Partial fill; remaining_quantity > 0. Order status = PARTIALLY_FILLED.
-Limit price too restrictive	No fills; remaining_quantity = quantity. Status = REJECTED or EXPIRED.
-Zero-size levels	Skipped.
-Level price = 0 or negative	Skipped (invalid).
-Empty order book	Zero fills; remaining_quantity = quantity.
-Large order requiring many levels	Walks up to max_simulation_depth (configurable) to bound computation.
-6. Reuse for Backtesting
-The backtest engine will replay historical OrderBookPayload snapshots. The execution path is identical:
-
-python
-# backtest_execution_engine.py (snippet)
-async def execute_order(order: OrderPayload, book: OrderBookPayload, timestamp: datetime):
-    fee_schedule = FeeSchedule.from_config(config, order.symbol)
-    result = simulate_fill(order, book, fee_schedule, timestamp)
-    # Directly store fills without publishing to live EventBus
-    return result
-Because simulate_fill is a pure function, it:
-
-Does not call datetime.now() (uses injected timestamp).
-
-Does not read os.environ or config (fee schedule is passed in).
-
-Does not access I/O, network, or asyncio.
-
-This guarantees deterministic replay: the same historical book + order sequence always produces the exact same fills, regardless of the machine or time of day.
-
-Summary
-Component	Key Feature
-FeeSchedule	Dataclass with taker/maker rates, loaded from ConfigManager.
-simulate_fill	Pure function – walks book, respects limit price, calculates weighted avg, handles partial fills.
-PaperExecutionHandler	Async wrapper fetching live book, calling pure simulator, emitting OrderEvent/FillEvent.
-Slippage Modeling	Realistic – consumes multiple depth levels based on order size, not just best bid/ask.
-Backtest Reuse	Backtest uses the exact same simulate_fill with historical data – no code duplication.
+6. Configuration (quantflow.yaml)
+yaml
+analytics:
+  risk_free_rate: 0.0   # e.g., 0.025 for 2.5% per year
+  annualization_factor: 252  # trading days per year
+7. Summary of Formulas Reference
+Metric	Formula	Computation Mode
+Win Rate	wins / total_trades	Incremental counter
+Avg Trade	sum(pnl) / total_trades	Incremental sum
+Profit Factor	sum(win_pnl) / sum(loss_pnl)	Incremental sums
+Avg Slippage	sum(slippage) / total_trades	Incremental
+Avg Latency	sum(latency) / fills_count	Incremental
+Sharpe	(mean_ret - rf) / std_ret * sqrt(252)	Online Welford
+Sortino	(mean_ret - rf) / downside_std * sqrt(252)	Online Welford (negative deviations)
+Max Drawdown	max( (peak - equity) / peak )	Running peak tracker
+Equity Curve	Daily snapshots of total_equity	Time‑series array

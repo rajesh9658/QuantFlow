@@ -342,3 +342,180 @@ async def test_paper_execution_handler_partial_fill_and_cancel() -> None:
     assert len(handler.get_open_orders()) == 0
 
     await handler.stop()
+
+
+def test_limit_sell_order_respects_price_cap() -> None:
+    """Limit SELL order only consumes bids at or above limit_price."""
+    order = OrderEvent(
+        strategy_id="test_strat",
+        symbol="BTC/USDT",
+        side="SELL",
+        order_type="LIMIT",
+        quantity=3.0,
+        price=99.5,
+    )
+    # Bids: 100.0 (>= 99.5), 99.5 (>= 99.5), 99.0 (< 99.5)
+    orderbook = {
+        "bids": [[100.0, 1.0], [99.5, 1.0], [99.0, 5.0]],
+        "asks": [[101.0, 10.0]],
+    }
+    fees = FeeSchedule(taker_rate=0.001)
+
+    result = simulate_fill(order, orderbook, fees)
+
+    # 1.0 @ 100.0 + 1.0 @ 99.5 filled, 99.0 bid rejected by limit price
+    assert result.remaining_quantity == pytest.approx(1.0)
+    assert len(result.fills) == 2
+    assert result.fills[0].fill_price == 100.0
+    assert result.fills[1].fill_price == 99.5
+    assert result.avg_price == pytest.approx(99.75)
+
+
+def test_empty_or_unmet_limit_yields_zero_fills() -> None:
+    """Empty book or unmet limit yields 0 fills and remaining == quantity."""
+    fees = FeeSchedule()
+
+    # 1. Empty order book
+    order_empty = OrderEvent(
+        strategy_id="test_strat",
+        symbol="BTC/USDT",
+        side="BUY",
+        order_type="MARKET",
+        quantity=2.0,
+    )
+    res_empty = simulate_fill(order_empty, {"bids": [], "asks": []}, fees)
+    assert res_empty.remaining_quantity == 2.0
+    assert len(res_empty.fills) == 0
+    assert res_empty.avg_price == 0.0
+
+    # 2. Limit price too restrictive
+    order_limit = OrderEvent(
+        strategy_id="test_strat",
+        symbol="BTC/USDT",
+        side="BUY",
+        order_type="LIMIT",
+        quantity=2.0,
+        price=95.0,  # Asks start at 100.0
+    )
+    book_limit = {"bids": [[90.0, 1.0]], "asks": [[100.0, 5.0]]}
+    res_limit = simulate_fill(order_limit, book_limit, fees)
+    assert res_limit.remaining_quantity == 2.0
+    assert len(res_limit.fills) == 0
+    assert res_limit.avg_price == 0.0
+
+
+def test_orderbook_skips_zero_or_negative_levels() -> None:
+    """Invalid price (<= 0) or size (<= 0) levels are skipped."""
+    order = OrderEvent(
+        strategy_id="test_strat",
+        symbol="BTC/USDT",
+        side="BUY",
+        order_type="MARKET",
+        quantity=2.0,
+    )
+    # Asks contain invalid levels (negative price, zero size)
+    orderbook = {
+        "bids": [[99.0, 10.0]],
+        "asks": [
+            [0.0, 10.0],     # Zero price (invalid)
+            [-10.0, 5.0],    # Negative price (invalid)
+            [100.0, 0.0],    # Zero size (invalid)
+            [100.0, 1.0],    # Valid level 1
+            [101.0, 2.0],    # Valid level 2
+        ],
+    }
+    fees = FeeSchedule(taker_rate=0.001)
+
+    result = simulate_fill(order, orderbook, fees)
+
+    assert result.remaining_quantity == 0.0
+    assert len(result.fills) == 2
+    assert result.fills[0].fill_price == 100.0
+    assert result.fills[0].quantity == 1.0
+    assert result.fills[1].fill_price == 101.0
+    assert result.fills[1].quantity == 1.0
+
+
+def test_duck_typed_and_dict_inputs() -> None:
+    """simulate_fill works seamlessly with plain dict order and book inputs."""
+    order_dict = {
+        "order_id": "dict_order_1",
+        "symbol": "ETH/USDT",
+        "side": "BUY",
+        "order_type": "MARKET",
+        "quantity": 1.5,
+    }
+    book_dict = {
+        "bids": [[1900.0, 5.0]],
+        "asks": [[2000.0, 1.0], [2010.0, 1.0]],
+    }
+    fees = FeeSchedule(taker_rate=0.001)
+
+    result = simulate_fill(order_dict, book_dict, fees)
+
+    assert result.remaining_quantity == 0.0
+    assert len(result.fills) == 2
+    assert result.fills[0].order_id == "dict_order_1"
+    assert result.fills[0].fill_price == 2000.0
+    assert result.fills[0].quantity == 1.0
+    assert result.fills[1].fill_price == 2010.0
+    assert result.fills[1].quantity == 0.5
+
+
+@pytest.mark.asyncio
+async def test_paper_execution_handler_modify_and_get_fills() -> None:
+    """Test modifying pending order and retrieving fills via get_fills."""
+    bus = AsyncEventBus()
+    book = LocalOrderBook("AVAX/USDT")
+    await book.apply_snapshot(
+        bids=[[30.0, 10.0]],
+        asks=[[35.0, 1.0], [36.0, 5.0]],
+        update_id=1,
+    )
+
+    handler = PaperExecutionHandler(
+        event_bus=bus, order_books={"AVAX/USDT": book}
+    )
+    await handler.start()
+
+    # Submit order requiring 3.0 units, but with limit price 35.0 (only 1.0 available)
+    order = OrderEvent(
+        order_id="avax_order_1",
+        strategy_id="strat_avax",
+        symbol="AVAX/USDT",
+        side="BUY",
+        order_type="LIMIT",
+        quantity=3.0,
+        price=35.0,
+    )
+    await handler.submit_order(order)
+
+    assert handler.get_order_status("avax_order_1") == "PARTIALLY_FILLED"
+    fills = handler.get_fills("avax_order_1")
+    assert len(fills) == 1
+    assert fills[0].fill_price == 35.0
+
+    # Modify open order to MARKET with remaining quantity
+    modified = await handler.modify_order(
+        "avax_order_1", order_type="MARKET", quantity=2.0
+    )
+    assert modified is True
+    assert handler.get_order_status("avax_order_1") == "CANCELLED"
+
+    await handler.stop()
+
+
+@pytest.mark.asyncio
+async def test_paper_execution_handler_missing_book_rejects() -> None:
+    """Submitting order for symbol without orderbook marks order REJECTED."""
+    handler = PaperExecutionHandler(order_books={})
+    order = OrderEvent(
+        order_id="missing_book_order",
+        strategy_id="strat_m",
+        symbol="UNKNOWN/USDT",
+        side="BUY",
+        order_type="MARKET",
+        quantity=1.0,
+    )
+    await handler.submit_order(order)
+    assert handler.get_order_status("missing_book_order") == "REJECTED"

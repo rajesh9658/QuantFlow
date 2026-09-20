@@ -45,6 +45,10 @@ database:
     assert config.get("database.host") == "db.staging.internal"
     # Default persists when un-overridden
     assert config.get("theme") == "dark"
+    # Containment check
+    assert "log_level" in config
+    assert "database.port" in config
+    assert "non_existent_key" not in config
 
 
 def test_missing_secret_raises_clear_error() -> None:

@@ -17,3 +17,8 @@ market_data:
   symbols:
     - "BTC-USD"
     - "ETH-USD"
+
+analytics:
+  risk_free_rate: 0.0   # e.g., 0.025 for 2.5% per year
+  annualization_factor: 252  # trading days per year
+

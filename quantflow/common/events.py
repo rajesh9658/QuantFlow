@@ -1,6 +1,7 @@
 """Event data models for QuantFlow event-driven framework using Pydantic V2."""
 
 from datetime import UTC, datetime
+from typing import Any, Self
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -19,9 +20,15 @@ class Event(BaseModel):
 
     event_id: str = Field(default_factory=_default_uuid)
     timestamp: datetime = Field(default_factory=_default_utc_now)
+    timestamp_received: datetime | None = None
     event_type: str = "EVENT"
 
     model_config = {"frozen": True}
+
+    @property
+    def payload(self) -> Self:
+        """Convenience property for accessing event content directly or wrapped."""
+        return self
 
 
 class MarketDataEvent(Event):
@@ -94,7 +101,15 @@ class FillEvent(Event):
     commission: float = 0.0
     exchange: str = ""
     realized_pnl: float = 0.0
+    expected_price: float | None = None
+    timestamp_exchange: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     event_type: str = "FILL"
+
+    @property
+    def price(self) -> float:
+        """Alias for fill_price to support generic execution interfaces."""
+        return self.fill_price
 
 
 class RiskEvent(Event):
@@ -163,5 +178,34 @@ class PortfolioUpdateEvent(Event):
     cash: float = 0.0
     total_value: float = 0.0
     positions: dict[str, float] = Field(default_factory=dict)
+    realized_pnl: float = 0.0
+    unrealized_pnl: float = 0.0
+    total_exposure: float = 0.0
+    positions_detail: dict[str, Any] = Field(default_factory=dict)
     event_type: str = "PORTFOLIO_UPDATE"
+
+    @property
+    def total_equity(self) -> float:
+        """Alias for total_value."""
+        return self.total_value
+
+
+class EventType:
+    """Type constants mapping to event classes for subscription."""
+
+    EVENT = Event
+    MARKET_DATA = MarketDataEvent
+    TICK = TickEvent
+    BAR = BarEvent
+    SIGNAL = SignalEvent
+    ORDER = OrderEvent
+    FILL = FillEvent
+    RISK = RiskEvent
+    SYSTEM = SystemEvent
+    ORDER_BOOK = OrderBookEvent
+    TRADE = TradeEvent
+    APPROVED_SIGNAL = ApprovedSignalEvent
+    REJECTED_SIGNAL = RejectedSignalEvent
+    PORTFOLIO_UPDATE = PortfolioUpdateEvent
+
 

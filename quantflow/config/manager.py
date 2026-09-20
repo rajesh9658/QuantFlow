@@ -1,4 +1,4 @@
-"""Layered configuration manager supporting defaults, YAML config files, and env overrides."""
+"""Layered configuration manager supporting defaults, YAML files, and env overrides."""
 
 import json
 import os
@@ -107,6 +107,27 @@ class ConfigManager:
                 return default
         return curr
 
+    def get_float(self, key: str, default: float = 0.0) -> float:
+        """Retrieve a float configuration value, casting if necessary."""
+        val = self.get(key, default)
+        return float(val) if val is not None else default
+
+
+
+    def get_int(self, key: str, default: int = 0) -> int:
+        """Retrieve an integer configuration value, casting if necessary."""
+        val = self.get(key, default)
+        return int(val) if val is not None else default
+
+    def get_bool(self, key: str, default: bool = False) -> bool:
+        """Retrieve a boolean configuration value."""
+        val = self.get(key, default)
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            return val.lower() in ("true", "1", "yes")
+        return bool(val) if val is not None else default
+
     def get_secret(self, key: str) -> str:
         """Delegate secret resolution to the configured SecretsProvider."""
         return self._secrets_provider.get_secret(key)
@@ -123,4 +144,4 @@ class ConfigManager:
         return val
 
     def __contains__(self, key: str) -> bool:
-        return self.get(key) is not None
+        return bool(self.get(key) is not None)

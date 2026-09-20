@@ -24,6 +24,10 @@ def load_config(config_path: str | Path | None = None) -> ConfigManager:
         "environment": "development",
         "log_level": "INFO",
         "event_bus": {"max_queue_size": 1000},
+        "analytics": {
+            "risk_free_rate": 0.0,
+            "annualization_factor": 252.0,
+        },
     }
     return ConfigManager(config_path=config_path, defaults=defaults)
 
