@@ -29,22 +29,51 @@ class SimpleMomentumStrategy(Strategy):
         self,
         event_bus: AsyncEventBus,
         config: dict[str, Any] | None = None,
+        clock: Any | None = None,
     ) -> None:
         cfg = config or {}
         self._bus = event_bus
+        self._clock = clock
         self._symbol: str = cfg.get("symbol", "BTC/USDT")
         self._period: int = cfg.get("period", 20)
         self._threshold: float = cfg.get("threshold", 0.02)
 
         self._prices: deque[float] = deque(maxlen=self._period + 1)
         self._last_side: str | None = None
+        self._subscribed = False
+        self._last_event_id: str | None = None
 
     def get_name(self) -> str:
         return f"SimpleMomentum({self._symbol})"
 
+    async def initialize(
+        self,
+        config: dict[str, Any] | None = None,
+        clock: Any | None = None,
+    ) -> None:
+        """Initialize configuration and clock, and subscribe to market ticks."""
+        if clock is not None:
+            self._clock = clock
+        cfg = config or {}
+        if "symbol" in cfg:
+            self._symbol = cfg["symbol"]
+        if "period" in cfg:
+            self._period = cfg["period"]
+            self._prices = deque(maxlen=self._period + 1)
+        if "threshold" in cfg:
+            self._threshold = cfg["threshold"]
+
+        if not self._subscribed and self._bus is not None:
+            await self._bus.subscribe(TickEvent, self.on_event)
+            self._subscribed = True
+
     async def on_event(self, event: Event) -> None:
         if not isinstance(event, TickEvent):
             return
+        if getattr(event, "event_id", None) and event.event_id == self._last_event_id:
+            return
+        self._last_event_id = getattr(event, "event_id", None)
+
         if event.symbol != self._symbol:
             return
 
@@ -73,12 +102,16 @@ class SimpleMomentumStrategy(Strategy):
             return  # already in this direction
         self._last_side = side
 
-        signal = SignalEvent(
-            strategy_id=self.get_name(),
-            symbol=self._symbol,
-            side=side,
-            quantity=1.0,
-            signal_strength=min(abs(ret) / self._threshold, 1.0),
-        )
+        sig_kwargs: dict[str, Any] = {
+            "strategy_id": self.get_name(),
+            "symbol": self._symbol,
+            "side": side,
+            "quantity": 1.0,
+            "signal_strength": min(abs(ret) / self._threshold, 1.0),
+        }
+        if self._clock is not None:
+            sig_kwargs["timestamp"] = self._clock.now()
+
+        signal = SignalEvent(**sig_kwargs)
         await self._bus.publish(signal)
         logger.info("%s signal for %s (return=%.4f)", side, self._symbol, ret)

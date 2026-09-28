@@ -1,961 +1,527 @@
-QuantFlow Platform Specification – Analytics Module
-The Analytics Module provides real‑time and historical performance metrics for the trading system. It consumes PortfolioUpdateEvent and FillEvent (or ExecutionEvent) to compute key statistics. The design ensures that the exact same formulas are used for live streaming (incremental) and offline backtesting (batch), guaranteeing consistency between paper/live trading results and historical simulations.
+QuantFlow Platform Specification – Replay Engine & Time Virtualization
+Design Guarantee
+The Replay Engine re-publishes historical events onto the same EventBus, using the same event types, at either real-time speed or accelerated. Strategies, Risk, Execution, Portfolio, and Analytics cannot distinguish replay from live because:
 
-1. Core Design Principles
-Unified Computation: A set of pure StatAggregator classes maintains rolling or incremental state. Batch computation simply instantiates these aggregators and feeds them the full historical dataset.
+Every component reads time via an injected Clock, never time.time() or datetime.now() directly.
 
-Event‑Driven Updates: In live mode, the AnalyticsEngine subscribes to events and updates aggregators. In backtest mode, a replay loop feeds historical events through the exact same interface.
+Every component subscribes/publishes via the EventBus interface, which the replay engine feeds exactly like a live ExchangeAdapter would.
 
-Time‑Series Alignment: All metrics are anchored to daily returns for Sharpe/Sortino to avoid dependencies on irregular trade timings. Daily equity snapshots are derived from PortfolioUpdateEvent.
+Every event carries the same schema (Sprint 0) with timestamp_exchange and timestamp_received filled from the simulated clock, not the wall clock.
 
-2. Metrics & Exact Formulas
-2.1 Returns & Volatility (Sharpe / Sortino)
-Let 
-E
-t
-E 
-t
-​
-  be the total equity at the end of day 
-t
-t.
-Define daily return:
+No component branches on source or environment. The composition root is the only place that knows whether we're live or replay.
 
-R
-t
-=
-E
-t
-−
-E
-t
-−
-1
-E
-t
-−
-1
-,
-with 
-E
-0
-=
-initial capital
-R 
-t
-​
- = 
-E 
-t−1
-​
- 
-E 
-t
-​
- −E 
-t−1
-​
- 
-​
- ,with E 
-0
-​
- =initial capital
-Mean Return (excess over risk‑free rate 
-R
-f
-R 
-f
-​
- ):
+This is provable: an integration test runs the same event stream through live and replay paths and asserts identical outputs (signals, fills, portfolio state) modulo wall-clock timestamps.
 
-R
-ˉ
-e
-=
-1
-N
-∑
-t
-=
-1
-N
-(
-R
-t
-−
-R
-f
-)
-R
-ˉ
-  
-e
-​
- = 
-N
-1
-​
-  
-t=1
-∑
-N
-​
- (R 
-t
-​
- −R 
-f
-​
- )
-Volatility (Standard Deviation):
-
-σ
-=
-1
-N
-−
-1
-∑
-t
-=
-1
-N
-(
-R
-t
-−
-R
-ˉ
-)
-2
-σ= 
-N−1
-1
-​
-  
-t=1
-∑
-N
-​
- (R 
-t
-​
- − 
-R
-ˉ
- ) 
-2
- 
-​
- 
-Downside Deviation (for Sortino, using negative returns only):
-
-σ
-d
-=
-1
-N
-−
-1
-∑
-t
-=
-1
-N
-min
-⁡
-(
-R
-t
-−
-R
-ˉ
-,
-0
-)
-2
-σ 
-d
-​
- = 
-N−1
-1
-​
-  
-t=1
-∑
-N
-​
- min(R 
-t
-​
- − 
-R
-ˉ
- ,0) 
-2
- 
-​
- 
-(Alternative definition uses 
-min
-⁡
-(
-R
-t
-,
-0
-)
-2
-min(R 
-t
-​
- ,0) 
-2
- ; we use the mean‑adjusted version for consistency with Sortino’s original paper.)
-
-Annualization Factor: 
-252
-252
-​
-  (assuming 252 trading days per year).
-Risk‑Free Rate: Read from ConfigManager (analytics.risk_free_rate, default 0.0).
-
-Sharpe
-=
-R
-ˉ
-e
-σ
-×
-252
-Sharpe= 
-σ
-R
-ˉ
-  
-e
-​
- 
-​
- × 
-252
-​
- 
-Sortino
-=
-R
-ˉ
-e
-σ
-d
-×
-252
-Sortino= 
-σ 
-d
-​
- 
-R
-ˉ
-  
-e
-​
- 
-​
- × 
-252
-​
- 
-Note: For live streaming, 
-R
-ˉ
-R
-ˉ
-  and 
-σ
-σ are computed incrementally using Welford’s online algorithm to avoid storing daily returns.
-
-2.2 Max Drawdown
-Given the equity curve 
-E
-0
-,
-E
-1
-,
-…
-,
-E
-N
-E 
-0
-​
- ,E 
-1
-​
- ,…,E 
-N
-​
- :
-
-Drawdown
-t
-=
-Peak
-t
-−
-E
-t
-Peak
-t
-,
-where 
-Peak
-t
-=
-max
-⁡
-0
-≤
-i
-≤
-t
-E
-i
-Drawdown 
-t
-​
- = 
-Peak 
-t
-​
- 
-Peak 
-t
-​
- −E 
-t
-​
- 
-​
- ,where Peak 
-t
-​
- = 
-0≤i≤t
-max
-​
- E 
-i
-​
- 
-Max Drawdown
-=
-max
-⁡
-0
-≤
-t
-≤
-N
-Drawdown
-t
-Max Drawdown= 
-0≤t≤N
-max
-​
- Drawdown 
-t
-​
- 
-This is computed by maintaining a running peak and the current drawdown percentage.
-
-2.3 Trade‑Based Metrics
-For a set of 
-M
-M closed trades, let 
-PnL
-i
-PnL 
-i
-​
-  be the realized profit/loss of trade 
-i
-i.
-
-Win Rate:
-
-Win Rate
-=
-#
-{
-i
-:
-PnL
-i
->
-0
-}
-M
-Win Rate= 
-M
-#{i:PnL 
-i
-​
- >0}
-​
- 
-Profit Factor:
-
-Profit Factor
-=
-∑
-i
-:
-PnL
-i
->
-0
-PnL
-i
-∑
-i
-:
-PnL
-i
-<
-0
-(
-−
-PnL
-i
-)
-Profit Factor= 
-∑ 
-i:PnL 
-i
-​
- <0
-​
- (−PnL 
-i
-​
- )
-∑ 
-i:PnL 
-i
-​
- >0
-​
- PnL 
-i
-​
- 
-​
- 
-If there are no losing trades, profit factor is defined as 
-∞
-∞ (or inf).
-
-Average Trade:
-
-PnL
-ˉ
-=
-1
-M
-∑
-i
-=
-1
-M
-PnL
-i
-PnL
-ˉ
- = 
-M
-1
-​
-  
-i=1
-∑
-M
-​
- PnL 
-i
-​
- 
-Average Slippage (per trade):
-
-Slippage
-i
-=
-ExecPrice
-i
-−
-ExpectedPrice
-i
-Slippage 
-i
-​
- =ExecPrice 
-i
-​
- −ExpectedPrice 
-i
-​
- 
-Slippage
-ˉ
-=
-1
-M
-∑
-i
-=
-1
-M
-Slippage
-i
-Slippage
-ˉ
-​
- = 
-M
-1
-​
-  
-i=1
-∑
-M
-​
- Slippage 
-i
-​
- 
-Average Latency (per fill/order):
-
-Latency
-j
-=
-timestamp_received
-j
-−
-timestamp_exchange
-j
-Latency 
-j
-​
- =timestamp_received 
-j
-​
- −timestamp_exchange 
-j
-​
- 
-Latency
-ˉ
-=
-1
-K
-∑
-j
-=
-1
-K
-Latency
-j
-Latency
-ˉ
-​
- = 
-K
-1
-​
-  
-j=1
-∑
-K
-​
- Latency 
-j
-​
- 
-(Where 
-K
-K is the total number of fills.)
-
-3. Aggregator Classes (Incremental & Reusable)
-These classes maintain running state and can be fed data sequentially.
-
+1. Clock Abstraction
 python
-# analytics/aggregators.py
-import math
-from typing import Optional, Tuple
-from datetime import datetime, timedelta, timezone
-
-
-class WelfordOnline:
-    """Online mean and variance (Welford's algorithm)."""
-    def __init__(self):
-        self.n = 0
-        self.mean = 0.0
-        self.m2 = 0.0   # sum of squared differences from mean
-
-    def update(self, x: float) -> None:
-        self.n += 1
-        delta = x - self.mean
-        self.mean += delta / self.n
-        delta2 = x - self.mean
-        self.m2 += delta * delta2
-
-    def variance(self) -> float:
-        return self.m2 / (self.n - 1) if self.n > 1 else 0.0
-
-    def stddev(self) -> float:
-        return math.sqrt(self.variance()) if self.n > 1 else 0.0
-
-
-class DrawdownTracker:
-    """Tracks running and maximum drawdown."""
-    def __init__(self, initial_equity: float):
-        self.peak = initial_equity
-        self.current_drawdown = 0.0
-        self.max_drawdown = 0.0
-
-    def update(self, equity: float) -> None:
-        if equity > self.peak:
-            self.peak = equity
-        self.current_drawdown = (self.peak - equity) / self.peak if self.peak > 0 else 0.0
-        self.max_drawdown = max(self.max_drawdown, self.current_drawdown)
-
-
-class TradeStatsAggregator:
-    """Aggregates per-trade PnL, slippage, win/loss counts."""
-    def __init__(self):
-        self.total_trades = 0
-        self.winning_trades = 0
-        self.sum_pnl = 0.0
-        self.sum_win_pnl = 0.0
-        self.sum_loss_pnl = 0.0  # absolute value of losses
-        self.sum_slippage = 0.0
-        self.sum_latency = 0.0
-        self.latency_count = 0
-
-    def add_trade(
-        self,
-        pnl: float,
-        slippage: Optional[float] = None,
-        latency: Optional[float] = None
-    ) -> None:
-        self.total_trades += 1
-        self.sum_pnl += pnl
-        if pnl > 0:
-            self.winning_trades += 1
-            self.sum_win_pnl += pnl
-        elif pnl < 0:
-            self.sum_loss_pnl += abs(pnl)
-
-        if slippage is not None:
-            self.sum_slippage += slippage
-        if latency is not None:
-            self.sum_latency += latency
-            self.latency_count += 1
-
-    @property
-    def win_rate(self) -> float:
-        return self.winning_trades / self.total_trades if self.total_trades > 0 else 0.0
-
-    @property
-    def avg_trade(self) -> float:
-        return self.sum_pnl / self.total_trades if self.total_trades > 0 else 0.0
-
-    @property
-    def profit_factor(self) -> float:
-        if self.sum_loss_pnl == 0:
-            return float('inf')
-        return self.sum_win_pnl / self.sum_loss_pnl
-
-    @property
-    def avg_slippage(self) -> float:
-        return self.sum_slippage / self.total_trades if self.total_trades > 0 else 0.0
-
-    @property
-    def avg_latency(self) -> float:
-        return self.sum_latency / self.latency_count if self.latency_count > 0 else 0.0
-4. Analytics Engine
-The engine combines the aggregators, collects daily equity samples, and computes final metrics on demand.
-
-python
-# analytics/engine.py
+# clock.py
+from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 import asyncio
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timezone, timedelta
-from collections import defaultdict
+import time
+from typing import List, Tuple, Optional
 
+
+class Clock(ABC):
+    """
+    Abstract time source. All components must use this instead of
+    datetime.now(), time.time(), or time.monotonic() directly.
+    """
+    @abstractmethod
+    def now(self) -> datetime:
+        """Return current timezone-aware UTC datetime."""
+        ...
+
+    @abstractmethod
+    def monotonic(self) -> float:
+        """Return a monotonic seconds counter (for latency measurement)."""
+        ...
+
+    @abstractmethod
+    async def sleep(self, seconds: float) -> None:
+        """Sleep for `seconds` of virtual time."""
+        ...
+
+
+class SystemClock(Clock):
+    """Live clock backed by the OS."""
+
+    def now(self) -> datetime:
+        return datetime.now(timezone.utc)
+
+    def monotonic(self) -> float:
+        return time.monotonic()
+
+    async def sleep(self, seconds: float) -> None:
+        await asyncio.sleep(seconds)
+
+
+class SimulatedClock(Clock):
+    """
+    Virtual clock driven by the Replay Engine.
+    - `now()` returns the simulated time.
+    - `sleep(s)` registers a wakeup at `now() + s` and blocks until
+      the replay engine advances simulated time to that point.
+    - `advance_to(t)` moves time forward and resolves any pending wakeups.
+    Thread-safe for a single-threaded asyncio event loop.
+    """
+
+    def __init__(self, start_time: datetime):
+        if start_time.tzinfo is None:
+            raise ValueError("SimulatedClock requires timezone-aware start_time")
+        self._current: datetime = start_time
+        self._monotonic_base: float = 0.0
+        self._wall_start: float = time.monotonic()
+        # Sorted list of (wakeup_time, future)
+        self._pending: List[Tuple[datetime, asyncio.Future]] = []
+
+    def now(self) -> datetime:
+        return self._current
+
+    def monotonic(self) -> float:
+        # Monotonic increases with simulated time, offset by wall base
+        delta = (self._current - self._epoch).total_seconds() if hasattr(self, "_epoch") else 0.0
+        # Simpler: derive from simulated time
+        return self._monotonic_base + (self._current - self._start).total_seconds()
+
+    @property
+    def _start(self) -> datetime:
+        return self._start_time
+
+    async def sleep(self, seconds: float) -> None:
+        if seconds <= 0:
+            return
+        target = self._current + __import__("datetime").timedelta(seconds=seconds)
+        fut = asyncio.get_running_loop().create_future()
+        # Insert keeping sorted order
+        import bisect
+        idx = bisect.bisect_left(self._pending, (target, None))
+        self._pending.insert(idx, (target, fut))
+        try:
+            await fut
+        except asyncio.CancelledError:
+            # Remove if cancelled
+            self._pending = [(t, f) for t, f in self._pending if f is not fut]
+            raise
+
+    def advance_to(self, target: datetime) -> None:
+        """
+        Advance simulated time to `target`. Resolves any pending sleeps
+        whose wakeup time is <= target.
+        """
+        if target < self._current:
+            raise ValueError(
+                f"Cannot move simulated clock backwards: {target} < {self._current}"
+            )
+        self._current = target
+        # Resolve wakeups
+        remaining: List[Tuple[datetime, asyncio.Future]] = []
+        for wake_time, fut in self._pending:
+            if wake_time <= target:
+                if not fut.done():
+                    fut.set_result(None)
+            else:
+                remaining.append((wake_time, fut))
+        self._pending = remaining
+
+    def peek_next_wakeup(self) -> Optional[datetime]:
+        """Return the earliest pending wakeup, if any."""
+        return self._pending[0][0] if self._pending else None
+
+    def set_start(self, start_time: datetime) -> None:
+        """Initialize the epoch. Called once by ReplayEngine before events."""
+        self._start_time = start_time
+        self._current = start_time
+2. Event Store Reader
+python
+# event_store.py
+from abc import ABC, abstractmethod
+from datetime import datetime
+from typing import AsyncIterator, List, Optional
+
+from events import BaseEvent
+
+
+class EventStoreReader(ABC):
+    """
+    Reads historical events from storage in the order they would have
+    been received in live trading (sorted by timestamp_received then
+    by a stable tie-breaker, e.g., insertion id).
+    """
+
+    @abstractmethod
+    async def read_range(
+        self,
+        start: datetime,
+        end: datetime,
+        event_types: Optional[List[str]] = None,
+        symbols: Optional[List[str]] = None,
+    ) -> AsyncIterator[BaseEvent]:
+        """
+        Async-iterate over events in [start, end), ordered by
+        (timestamp_received, id).
+        """
+        ...
+
+    @abstractmethod
+    async def read_all(
+        self,
+        event_types: Optional[List[str]] = None,
+        symbols: Optional[List[str]] = None,
+    ) -> AsyncIterator[BaseEvent]:
+        """Iterate over the entire store."""
+        ...
+
+
+class PostgresEventStoreReader(EventStoreReader):
+    """
+    Reads from the Sprint 7 PostgreSQL schema. Merges the partitioned
+    `tickers`, `orderbooks`, and non-partitioned `signals`/`executions`
+    into a single chronological stream.
+    """
+
+    def __init__(self, session_factory, batch_size: int = 1000):
+        self._session_factory = session_factory
+        self._batch_size = batch_size
+
+    async def read_range(self, start, end, event_types=None, symbols=None):
+        # Pseudocode: SELECT ... FROM tickers/orderbooks UNION ALL ... ORDER BY received_at, id
+        # Yield reconstructed BaseEvent objects (TickerEvent, OrderBookEvent, ...)
+        # Batch-fetched to avoid loading full history in memory.
+        ...
+
+    async def read_all(self, event_types=None, symbols=None):
+        ...
+3. Replay Engine
+The Replay Engine is a discrete-event simulator. Its main loop merges:
+
+Market data events (sorted by their virtual arrival time)
+
+Clock wakeups (from SimulatedClock.sleep calls inside strategies)
+
+It advances the simulated clock to the earliest of these, processes it, and repeats.
+
+python
+# replay_engine.py
+import asyncio
+from datetime import datetime, timedelta, timezone
+from typing import AsyncIterator, List, Optional
+
+from clock import SimulatedClock
+from event_store import EventStoreReader
 from interfaces import EventBus
-from events import PortfolioUpdateEvent, FillEvent, EventType
-from config_manager import ConfigManager
+from events import BaseEvent
 from logging_setup import get_logger
-from analytics.aggregators import WelfordOnline, DrawdownTracker, TradeStatsAggregator
 
 
-class AnalyticsEngine:
+class ReplaySpeed:
+    """How fast to run simulated time relative to wall time."""
+    REAL_TIME = 1.0
+    X10 = 10.0
+    X100 = 100.0
+    INSTANT = float("inf")  # as fast as possible
+
+
+class ReplayEngine:
     """
-    Real‑time analytics engine. Subscribes to PortfolioUpdate and Fill events.
-    Maintains rolling stats and exposes computed metrics.
+    Reads historical events and republishes them on the EventBus.
+    Drives the SimulatedClock so all components see consistent time.
     """
 
-    def __init__(self, config: ConfigManager, event_bus: EventBus):
-        self.config = config
+    def __init__(
+        self,
+        event_store: EventStoreReader,
+        event_bus: EventBus,
+        clock: SimulatedClock,
+        speed: float = ReplaySpeed.INSTANT,
+        event_types: Optional[List[str]] = None,
+        symbols: Optional[List[str]] = None,
+    ):
+        self.event_store = event_store
         self.event_bus = event_bus
-        self.logger = get_logger("analytics_engine")
-
-        # Config
-        self.risk_free_rate = config.get_float("analytics.risk_free_rate", 0.0)
-
-        # State
-        self.initial_equity: Optional[float] = None
-        self.last_equity: Optional[float] = None
-        self.last_update_day: Optional[str] = None  # YYYY-MM-DD
-
-        # Daily return aggregator (for Sharpe/Sortino)
-        self.return_aggregator = WelfordOnline()
-        self.downside_aggregator = WelfordOnline()  # stores negative deviations
-
-        # Drawdown
-        self.drawdown_tracker: Optional[DrawdownTracker] = None
-
-        # Trade stats
-        self.trade_stats = TradeStatsAggregator()
-
-        # Equity curve (store daily snapshots for batch/visualization)
-        self.equity_curve: List[Tuple[datetime, float]] = []
-
-        # Running flag
+        self.clock = clock
+        self.speed = speed
+        self.event_types = event_types
+        self.symbols = symbols
+        self.logger = get_logger("replay_engine")
         self._running = False
 
-    async def start(self) -> None:
-        if self._running:
-            return
+    async def run(self, start: datetime, end: datetime) -> None:
+        """
+        Replay all events in [start, end) through the EventBus at the
+        configured speed, driving the SimulatedClock.
+        """
         self._running = True
-        await self.event_bus.subscribe(EventType.PORTFOLIO_UPDATE, self._handle_portfolio)
-        await self.event_bus.subscribe(EventType.FILL, self._handle_fill)
-        self.logger.info("Analytics Engine started")
+        self.clock.set_start(start)
+
+        wall_start = asyncio.get_event_loop().time()
+
+        self.logger.info(
+            f"Replay starting: range=[{start}, {end}), speed={self.speed}x"
+        )
+
+        async for event in self.event_store.read_range(
+            start, end, event_types=self.event_types, symbols=self.symbols
+        ):
+            if not self._running:
+                break
+
+            # ---- Advance simulated clock to this event's virtual arrival ----
+            virtual_arrival = event.timestamp_received or event.timestamp_exchange
+            await self._advance_to(virtual_arrival, wall_start)
+
+            # ---- Republish event exactly as live would ----
+            await self.event_bus.publish(event)
+
+        # ---- Drain pending wakeups past the last event ----
+        await self._drain_wakeups(wall_start)
+
+        self.logger.info("Replay complete")
 
     async def stop(self) -> None:
-        if not self._running:
-            return
         self._running = False
-        await self.event_bus.unsubscribe(EventType.PORTFOLIO_UPDATE, self._handle_portfolio)
-        await self.event_bus.unsubscribe(EventType.FILL, self._handle_fill)
-        self.logger.info("Analytics Engine stopped")
 
-    # ---------- Event Handlers ----------
+    # ---------- Internal ----------
 
-    async def _handle_portfolio(self, event: PortfolioUpdateEvent) -> None:
-        """Process portfolio updates to compute daily returns and drawdown."""
-        if not self._running:
+    async def _advance_to(self, target: datetime, wall_start: float) -> None:
+        """
+        Advance clock to `target`, honoring the speed factor.
+        - If INSTANT: advance immediately.
+        - Otherwise: sleep wall-clock `(target - clock.now()) / speed`
+          before advancing simulated time.
+        """
+        current = self.clock.now()
+        if target <= current:
             return
 
-        equity = event.payload.total_value
-        timestamp = event.timestamp_received or datetime.now(timezone.utc)
-        day_key = timestamp.date().isoformat()
-
-        # Initialize
-        if self.initial_equity is None:
-            self.initial_equity = equity
-            self.drawdown_tracker = DrawdownTracker(equity)
-            self.last_equity = equity
-            self.last_update_day = day_key
-            self.equity_curve.append((timestamp, equity))
+        if self.speed == ReplaySpeed.INSTANT or self.speed == float("inf"):
+            self.clock.advance_to(target)
             return
 
-        # Check if we crossed a new day
-        if day_key != self.last_update_day:
-            # Compute daily return for the previous day
-            if self.last_equity is not None and self.last_equity > 0:
-                daily_ret = (equity - self.last_equity) / self.last_equity
-                self._add_daily_return(daily_ret)
+        virtual_delta = (target - current).total_seconds()
+        wall_delay = virtual_delta / self.speed
 
-            # Update day tracker
-            self.last_update_day = day_key
-            self.last_equity = equity
+        # Cap wall delay so we don't sleep for hours of simulated time
+        # when there are large gaps between events in real-time mode.
+        # (Real-time replay naturally blocks here.)
+        if wall_delay > 0:
+            await asyncio.sleep(wall_delay)
 
-            # Store equity curve snapshot at the start of the new day (or end of previous)
-            self.equity_curve.append((timestamp, equity))
-        else:
-            # Within the same day, just update drawdown (equity may fluctuate)
-            pass
+        self.clock.advance_to(target)
 
-        # Update drawdown regardless of day boundary
-        if self.drawdown_tracker:
-            self.drawdown_tracker.update(equity)
-
-        # Store the latest equity for future daily returns
-        self.last_equity = equity
-
-    async def _handle_fill(self, event: FillEvent) -> None:
-        """Process fills to compute trade PnL, slippage, and latency."""
-        if not self._running:
-            return
-
-        fill = event.payload
-
-        # 1. PnL per trade: we rely on the portfolio engine to compute realized PnL per fill.
-        # The fill event can carry a 'realized_pnl' field in metadata.
-        realized_pnl = fill.metadata.get("realized_pnl", 0.0)
-
-        # 2. Slippage: expected price from signal metadata or reference price.
-        expected_price = fill.metadata.get("expected_price")
-        slippage = None
-        if expected_price is not None and expected_price > 0:
-            slippage = fill.price - expected_price
-
-        # 3. Latency: timestamp_received - timestamp_exchange
-        latency = None
-        if event.timestamp_received and event.timestamp_exchange:
-            latency = (event.timestamp_received - event.timestamp_exchange).total_seconds()
-
-        # Add to aggregator (only if we consider this a closed trade segment)
-        # Note: In practice, a 'trade' might be composed of multiple fills.
-        # For this design, we treat each fill as contributing to the PnL of its order.
-        # Better: aggregate per order, but for real-time we can approximate.
-        if abs(realized_pnl) > 1e-12:
-            self.trade_stats.add_trade(realized_pnl, slippage, latency)
-
-    # ---------- Internal Computation ----------
-
-    def _add_daily_return(self, ret: float) -> None:
-        """Update both standard and downside variance aggregators."""
-        # Standard return
-        self.return_aggregator.update(ret)
-
-        # Downside deviation (for Sortino)
-        downside = min(ret - self.return_aggregator.mean, 0.0)
-        self.downside_aggregator.update(downside)
-
-    # ---------- Batch Loading (for Backtests) ----------
-
-    def load_historical_equity(self, equity_curve: List[Tuple[datetime, float]]) -> None:
+    async def _drain_wakeups(self, wall_start: float) -> None:
         """
-        Bulk‑load a historical equity curve for batch/backtest calculations.
-        Resets all internal state and replays the curve.
+        After all events are processed, resolve any pending clock wakeups
+        (e.g., a strategy scheduled a sleep that lands after the last event).
         """
-        self.reset()
-        for ts, eq in equity_curve:
-            # Simulate portfolio update logic
-            if self.initial_equity is None:
-                self.initial_equity = eq
-                self.drawdown_tracker = DrawdownTracker(eq)
-                self.last_equity = eq
-                self.last_update_day = ts.date().isoformat()
-                self.equity_curve.append((ts, eq))
-                continue
+        while True:
+            next_wake = self.clock.peek_next_wakeup()
+            if next_wake is None:
+                break
+            await self._advance_to(next_wake, wall_start)
+            # Yield control so wakeups can run their continuations
+            await asyncio.sleep(0)
+3.1 Replay Speed Semantics
+Speed	Meaning	Use Case
+1.0 (REAL_TIME)	Events published at their historical pace	Live-drill / demo
+10.0	10x faster than real time	Fast paper run
+100.0	100x faster	Same-day backtests
+inf (INSTANT)	All events published as fast as possible	Backtesting
+In all modes, the strategies and risk modules see identical event ordering and identical simulated timestamps. Only the wall-clock delay changes.
 
-            day_key = ts.date().isoformat()
-            if day_key != self.last_update_day:
-                if self.last_equity is not None and self.last_equity > 0:
-                    daily_ret = (eq - self.last_equity) / self.last_equity
-                    self._add_daily_return(daily_ret)
-                self.last_update_day = day_key
-                self.last_equity = eq
-                self.equity_curve.append((ts, eq))
-            else:
-                pass  # same day, just update equity for drawdown
+4. Refactoring: What Changes in Existing Modules
+Every module that currently calls datetime.now(timezone.utc) must accept a Clock in its constructor. Below is the minimal change set.
 
-            if self.drawdown_tracker:
-                self.drawdown_tracker.update(eq)
-            self.last_equity = eq
+4.1 Market Data Engine
+Before: datetime.now(timezone.utc) on every event.
 
-    def load_historical_trades(
-        self,
-        trades: List[Tuple[float, Optional[float], Optional[float]]]
-    ) -> None:
-        """
-        Bulk‑load historical trades: (pnl, slippage, latency).
-        """
-        for pnl, slippage, latency in trades:
-            self.trade_stats.add_trade(pnl, slippage, latency)
+After: self.clock.now().
 
-    # ---------- Reset ----------
+The engine now receives clock: Clock in __init__.
 
-    def reset(self) -> None:
-        """Reset all state to compute a fresh set of metrics."""
-        self.initial_equity = None
-        self.last_equity = None
-        self.last_update_day = None
-        self.return_aggregator = WelfordOnline()
-        self.downside_aggregator = WelfordOnline()
-        self.drawdown_tracker = None
-        self.trade_stats = TradeStatsAggregator()
-        self.equity_curve.clear()
+4.2 Strategy (base interface)
+Strategies that need time (e.g., warm-up periods, periodic rebalancing) receive a Clock in their initialize(config, clock) method.
 
-    # ---------- Metric Getters ----------
+No strategy may call asyncio.sleep directly — they must use await clock.sleep(...). This is the single most important rule.
 
-    def get_metrics(self) -> Dict[str, float]:
-        """Return the full set of performance metrics."""
-        metrics = {}
+SimpleMomentumStrategy uses clock.now() for its signal timestamps.
 
-        # Sharpe
-        mean_ret = self.return_aggregator.mean
-        std_ret = self.return_aggregator.stddev()
-        excess_ret = mean_ret - self.risk_free_rate
-        annual_factor = math.sqrt(252)
-        metrics["sharpe_ratio"] = (excess_ret / std_ret) * annual_factor if std_ret > 0 else 0.0
+4.3 Risk Engine
+Circuit breaker uses daily rollover checks (datetime.now().date()). Change to self.clock.now().date().
 
-        # Sortino
-        downside_std = self.downside_aggregator.stddev()
-        metrics["sortino_ratio"] = (excess_ret / downside_std) * annual_factor if downside_std > 0 else 0.0
+Trading hours check uses self.clock.now().
 
-        # Drawdown
-        metrics["max_drawdown"] = self.drawdown_tracker.max_drawdown if self.drawdown_tracker else 0.0
-        metrics["current_drawdown"] = self.drawdown_tracker.current_drawdown if self.drawdown_tracker else 0.0
+Daily PnL reset also uses self.clock.now().
 
-        # Trade metrics
-        metrics["win_rate"] = self.trade_stats.win_rate
-        metrics["profit_factor"] = self.trade_stats.profit_factor
-        metrics["avg_trade"] = self.trade_stats.avg_trade
-        metrics["avg_slippage"] = self.trade_stats.avg_slippage
-        metrics["avg_latency"] = self.trade_stats.avg_latency
-        metrics["total_trades"] = float(self.trade_stats.total_trades)
+4.4 Execution Handler (Paper)
+Fill timestamps use self.clock.now().
 
-        # Total return
-        if self.initial_equity and self.last_equity:
-            metrics["total_return"] = (self.last_equity - self.initial_equity) / self.initial_equity
+No change to the pure simulate_fill function — it already takes timestamp as a parameter.
 
-        return metrics
+4.5 Portfolio Engine
+PortfolioState.last_updated uses self.clock.now().
 
-    def get_equity_curve(self) -> List[Tuple[datetime, float]]:
-        """Return the equity curve samples."""
-        return self.equity_curve.copy()
-5. Batch / Offline Usage (Backtest)
-For backtesting, the exact same analytics engine is used:
+Price provider integration unchanged.
 
+4.6 Analytics Engine
+Day rollover uses self.clock.now().date().
+
+Equity curve timestamps use self.clock.now().
+
+4.7 Scheduler
+AsyncIOScheduler currently uses asyncio.sleep. Refactor to use await self.clock.sleep(...).
+
+This is the mechanism that allows strategies to schedule periodic jobs in replay mode — the scheduler will fire in simulated time.
+
+4.8 What Does NOT Change
+Event schemas (BaseEvent and subclasses): unchanged.
+
+EventBus interface: unchanged.
+
+ExchangeAdapter interface: unchanged (live implementation continues to use SystemClock).
+
+All formulas and algorithms: unchanged.
+
+5. Proof of Indistinguishability
+5.1 Structural Argument
+Every component in the pipeline depends only on:
+
+The EventBus interface (publish/subscribe).
+
+The Clock interface (now/sleep).
+
+The ConfigManager (immutable during a run).
+
+The Replay Engine is substituted for the live ExchangeAdapter at the composition root. It emits the exact same event types with the exact same fields (only source differs, and no component branches on it). No component inspects the environment or the source of events.
+
+5.2 Integration Test: Live vs Replay Parity
 python
-# backtest_runner.py (snippet)
-analytics = AnalyticsEngine(config, event_bus)
-analytics.load_historical_equity(historical_equity_samples)
-analytics.load_historical_trades(historical_trade_pnls)
-metrics = analytics.get_metrics()
-No code duplication ensures 100% correlation between backtest results and live paper trading results.
+# tests/test_replay_parity.py
+import asyncio
+from datetime import datetime, timezone
+from clock import SystemClock, SimulatedClock
+from event_bus_in_memory import InMemoryEventBus
+from replay_engine import ReplayEngine, ReplaySpeed
+from event_store import InMemoryEventStoreReader
+# ... import engines ...
+
+async def run_pipeline(clock, event_source, event_bus):
+    """Run the full pipeline and capture signals, fills, portfolio states."""
+    # Wire up engines with the SAME clock and bus
+    strategy = SimpleMomentumStrategy(event_bus, {"symbol": "BTC/USDT", "period": 5, "threshold": 0.01})
+    await strategy.initialize({}, clock)
+
+    risk = RiskEngine(config, event_bus, exchange, exec_handler, clock)
+    portfolio = PortfolioEngine(config, event_bus, price_provider, clock)
+    analytics = AnalyticsEngine(config, event_bus, clock)
+
+    await risk.start(); await portfolio.start(); await analytics.start()
+
+    # Feed events
+    if isinstance(event_source, ReplayEngine):
+        await event_source.run(start, end)
+    else:
+        # Live-like: feed events directly
+        for ev in historical_events:
+            await event_bus.publish(ev)
+
+    # Collect results
+    return {
+        "signals": captured_signals,
+        "fills": captured_fills,
+        "portfolio": portfolio.state,
+        "metrics": analytics.get_metrics(),
+    }
+
+async def test_parity():
+    historical = load_fixture_events("btc_usdt_1day.json")
+
+    # --- Run 1: Simulated replay ---
+    sim_clock = SimulatedClock(start_time=historical[0].timestamp_received)
+    bus1 = InMemoryEventBus(clock=sim_clock)
+    store = InMemoryEventStoreReader(historical)
+    replay = ReplayEngine(store, bus1, sim_clock, speed=ReplaySpeed.INSTANT)
+    result_replay = await run_pipeline(sim_clock, replay, bus1)
+
+    # --- Run 2: Direct injection (mimics live) ---
+    # SystemClock is used but events are injected at wall-clock speed.
+    sys_clock = SystemClock()
+    bus2 = InMemoryEventBus(clock=sys_clock)
+    result_live = await run_pipeline(sys_clock, historical, bus2)
+
+    # --- Assert structural equivalence ---
+    assert [s.payload.direction for s in result_replay["signals"]] == \
+           [s.payload.direction for s in result_live["signals"]]
+    assert [f.payload.price for f in result_replay["fills"]] == \
+           [f.payload.price for f in result_live["fills"]]
+    assert result_replay["portfolio"].cash == result_live["portfolio"].cash
+    assert result_replay["metrics"]["sharpe_ratio"] == result_live["metrics"]["sharpe_ratio"]
+Because the SimulatedClock is monotonic and deterministic, and because every engine reads time from it, the replay run produces byte-identical outputs (except for wall-clock timestamp_received if the SystemClock is used — which is why the test compares structural fields, not wall-clock fields).
+
+5.3 The Golden Rule
+No code outside SystemClock may call datetime.now(), time.time(), time.monotonic(), or asyncio.sleep(). This is enforced via:
+
+A CI lint rule (custom flake8 / ruff plugin) that greps for these symbols in non-test, non-clock.py files.
+
+Code review checklist.
+
+The integration parity test above.
 
 6. Configuration (quantflow.yaml)
 yaml
-analytics:
-  risk_free_rate: 0.0   # e.g., 0.025 for 2.5% per year
-  annualization_factor: 252  # trading days per year
-7. Summary of Formulas Reference
-Metric	Formula	Computation Mode
-Win Rate	wins / total_trades	Incremental counter
-Avg Trade	sum(pnl) / total_trades	Incremental sum
-Profit Factor	sum(win_pnl) / sum(loss_pnl)	Incremental sums
-Avg Slippage	sum(slippage) / total_trades	Incremental
-Avg Latency	sum(latency) / fills_count	Incremental
-Sharpe	(mean_ret - rf) / std_ret * sqrt(252)	Online Welford
-Sortino	(mean_ret - rf) / downside_std * sqrt(252)	Online Welford (negative deviations)
-Max Drawdown	max( (peak - equity) / peak )	Running peak tracker
-Equity Curve	Daily snapshots of total_equity	Time‑series array
+replay:
+  speed: 100.0                      # 1.0 = real time, 100.0 = 100x, 0.0 = instant
+  event_types: ["ticker", "orderbook", "trade"]
+  symbols: ["BTC/USDT", "ETH/USDT"]
+  start: "2026-08-01T00:00:00Z"     # optional; overridden by CLI
+  end: "2026-08-02T00:00:00Z"
+  source: "postgres"                # postgres | parquet | in_memory
+7. Composition Root: Live vs Replay
+python
+# main.py
+async def build_app(mode: str):
+    config = ConfigManager(Path("quantflow.yaml"))
+    configure_logging(config)
+
+    if mode == "live":
+        clock = SystemClock()
+        event_bus = InMemoryEventBus(clock=clock)
+        adapter = BinanceAdapter(config, clock, event_bus)
+        exchange = adapter
+    elif mode == "paper":
+        clock = SystemClock()
+        event_bus = InMemoryEventBus(clock=clock)
+        exchange = BinanceAdapter(config, clock, event_bus)  # live market data
+        execution = PaperExecutionHandler(config, event_bus, order_books, clock)
+    elif mode == "replay":
+        clock = SimulatedClock(start_time=config.get_datetime("replay.start"))
+        event_bus = InMemoryEventBus(clock=clock)
+        store = PostgresEventStoreReader(session_factory)
+        replay = ReplayEngine(store, event_bus, clock, speed=config.get_float("replay.speed"))
+        exchange = NullExchangeAdapter(clock)  # or reuse market data engine fed by replay
+        execution = PaperExecutionHandler(config, event_bus, order_books, clock)
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+    # All engines receive `clock` and `event_bus` — identical wiring in all modes
+    market_engine = MarketDataEngine(event_bus, clock)
+    portfolio = PortfolioEngine(config, event_bus, get_mid_price, clock)
+    risk = RiskEngine(config, event_bus, exchange, execution, clock)
+    analytics = AnalyticsEngine(config, event_bus, clock)
+    strategy_engine = StrategyEngine(event_bus, strategies, clock)
+
+    # ... start all ...
+    if mode == "replay":
+        await replay.run(start, end)
+    else:
+        await asyncio.Event().wait()  # run forever
+Notice that the pipeline wiring is identical across modes. Only the clock and the event source differ. This is the architectural guarantee that replay and live are indistinguishable to the rest of the system.
+
+Summary
+Concern	Solution
+Time virtualization	Clock abstraction (SystemClock / SimulatedClock), injected everywhere.
+Replay fidelity	Replay Engine reads from EventStoreReader and republishes to the same EventBus used in live.
+Speed control	Wall-clock delay = virtual_delta / speed; INSTANT bypasses sleeping.
+Clock wakeups	SimulatedClock.sleep() registers futures; the Replay Engine merges event times with wakeup times in a discrete-event loop.
+Indistinguishability	No component branches on mode; only the composition root selects Clock and event source. CI lint forbids direct time calls outside SystemClock.
+Verification	Integration parity test runs the same stream through replay and injected-live, asserts identical signals, fills, and portfolio state.

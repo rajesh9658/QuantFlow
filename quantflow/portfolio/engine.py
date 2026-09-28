@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from quantflow.common.events import FillEvent, PortfolioUpdateEvent
 from quantflow.config.manager import ConfigManager
+from quantflow.core.clock import Clock, SystemClock
 from quantflow.core.interfaces import EventBus, PortfolioManager
 from quantflow.core.logging import get_logger
 from quantflow.database.repository import (
@@ -80,15 +81,24 @@ class PortfolioEngine(PortfolioManager):
         config: ConfigManager | None = None,
         event_bus: EventBus | None = None,
         price_provider: PriceProvider | None = None,
-        initial_cash: float | None = None,
+        initial_cash_or_clock: float | Clock | None = None,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
         portfolio_id: str = "quantflow_main",
+        clock: Clock | None = None,
+        initial_cash: float | None = None,
     ) -> None:
         self.config = config if config is not None else ConfigManager()
         self.event_bus = event_bus
         self.price_provider = price_provider
         self.session_factory = session_factory
         self.portfolio_id = portfolio_id
+
+        if isinstance(initial_cash_or_clock, Clock):
+            clock = initial_cash_or_clock
+        elif isinstance(initial_cash_or_clock, (int, float)):
+            initial_cash = float(initial_cash_or_clock)
+
+        self.clock: Clock = clock or SystemClock()
 
         if initial_cash is not None:
             start_cash = float(initial_cash)
@@ -100,7 +110,7 @@ class PortfolioEngine(PortfolioManager):
         self.state = PortfolioState(
             cash=start_cash,
             total_equity=start_cash,
-            last_updated=datetime.now(UTC),
+            last_updated=self.clock.now(),
         )
         self._last_prices: dict[str, float] = {}
         self._lock = asyncio.Lock()
@@ -304,7 +314,7 @@ class PortfolioEngine(PortfolioManager):
         self.state.unrealized_pnl = total_upl
         self.state.total_exposure = total_exposure
         self.state.total_equity = self.state.cash + total_mtm
-        self.state.last_updated = datetime.now(UTC)
+        self.state.last_updated = self.clock.now()
 
     def _recalculate_valuation_sync(self) -> None:
         """Synchronous valuation update using cached/average prices."""
@@ -333,7 +343,7 @@ class PortfolioEngine(PortfolioManager):
         self.state.unrealized_pnl = total_upl
         self.state.total_exposure = total_exposure
         self.state.total_equity = self.state.cash + total_mtm
-        self.state.last_updated = datetime.now(UTC)
+        self.state.last_updated = self.clock.now()
 
     # ── EventBus Publishing ──────────────────────────────────────
 

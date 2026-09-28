@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from quantflow.core.clock import Clock, SystemClock
 from quantflow.core.logging import get_logger
 
 
@@ -52,7 +53,8 @@ class Scheduler(ABC):
 class AsyncIOScheduler(Scheduler):
     """AsyncIO implementation of Scheduler supporting non-overlapping recurring jobs."""
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Clock | None = None) -> None:
+        self.clock: Clock = clock or SystemClock()
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._running_jobs: set[str] = set()
         self._lock = asyncio.Lock()
@@ -88,7 +90,7 @@ class AsyncIOScheduler(Scheduler):
         async def _recurring_wrapper() -> None:
             while not self._shutdown_event.is_set():
                 try:
-                    await asyncio.sleep(interval_seconds)
+                    await self.clock.sleep(interval_seconds)
                 except asyncio.CancelledError:
                     break
 
@@ -133,7 +135,7 @@ class AsyncIOScheduler(Scheduler):
 
         async def _once_wrapper() -> None:
             try:
-                await asyncio.sleep(delay_seconds)
+                await self.clock.sleep(delay_seconds)
                 if self._shutdown_event.is_set():
                     return
                 await coro(*args, **kwargs)

@@ -21,6 +21,7 @@ from quantflow.common.events import (
     SignalEvent,
 )
 from quantflow.config.manager import ConfigManager
+from quantflow.core.clock import Clock, SystemClock
 from quantflow.core.interfaces import EventBus, RiskManager
 from quantflow.core.logging import get_logger
 
@@ -45,6 +46,7 @@ class RiskContext(ABC):
     """Context provided to RiskChecks containing market, portfolio, and config state."""
 
     config: ConfigManager
+    clock: Clock
     positions: dict[str, float]
     daily_realized_pnl: float
     current_day: str
@@ -115,8 +117,13 @@ class AllowedSymbolsCheck(RiskCheck):
 class MarketHoursCheck(RiskCheck):
     """Validates that current time is within configured trading schedule."""
 
-    def __init__(self, now_fn: Callable[[], datetime] | None = None) -> None:
+    def __init__(
+        self,
+        now_fn: Callable[[], datetime] | None = None,
+        clock: Clock | None = None,
+    ) -> None:
         self._now_fn = now_fn
+        self._clock = clock
 
     async def validate(
         self, signal: SignalEvent, context: RiskContext
@@ -136,7 +143,14 @@ class MarketHoursCheck(RiskCheck):
         if not start_str or not end_str:
             return True, None
 
-        now_dt = self._now_fn() if self._now_fn else datetime.now(tz)
+        if self._now_fn:
+            now_dt = self._now_fn()
+        elif self._clock:
+            now_dt = self._clock.now()
+        elif hasattr(context, "clock") and context.clock is not None:
+            now_dt = context.clock.now()
+        else:
+            now_dt = datetime.now(tz)
         if now_dt.tzinfo is None:
             now_dt = now_dt.replace(tzinfo=tz)
         else:
@@ -257,7 +271,11 @@ class DailyLossLimitCheck(RiskCheck):
         if max_loss == float("inf"):
             return True, None
 
-        today = datetime.now(UTC).date().isoformat()
+        today = (
+            context.clock.now().date().isoformat()
+            if hasattr(context, "clock") and context.clock is not None
+            else datetime.now(UTC).date().isoformat()
+        )
         if today != context.current_day:
             context.daily_realized_pnl = 0.0
             context.current_day = today
@@ -308,12 +326,22 @@ class RiskEngine(RiskManager, RiskContext):
         event_bus: EventBus | None = None,
         exchange_adapter: Any | None = None,
         execution_handler: Any | None = None,
+        clock_or_checks: Clock | list[RiskCheck] | None = None,
         checks: list[RiskCheck] | None = None,
+        clock: Clock | None = None,
     ) -> None:
         self.config = config if config is not None else ConfigManager()
         self.event_bus = event_bus
         self.exchange = exchange_adapter
         self.execution = execution_handler
+
+        # Disambiguate 5th positional arg
+        if isinstance(clock_or_checks, Clock):
+            clock = clock_or_checks
+        elif isinstance(clock_or_checks, list):
+            checks = clock_or_checks
+
+        self.clock: Clock = clock or SystemClock()
 
         # State
         self.positions: dict[str, float] = {}
@@ -322,7 +350,7 @@ class RiskEngine(RiskManager, RiskContext):
         self.market_prices: dict[str, float] = {}
 
         self.daily_realized_pnl: float = 0.0
-        self.current_day: str = datetime.now(UTC).date().isoformat()
+        self.current_day: str = self.clock.now().date().isoformat()
         self.trade_pnl_history: deque[float] = deque(
             maxlen=int(self.config.get("risk.circuit_breaker_loss_count", 5))
         )
@@ -534,7 +562,7 @@ class RiskEngine(RiskManager, RiskContext):
             self.positions.pop(event.symbol, None)
 
         if event.realized_pnl != 0.0:
-            today = datetime.now(UTC).date().isoformat()
+            today = self.clock.now().date().isoformat()
             if today != self.current_day:
                 self.daily_realized_pnl = 0.0
                 self.current_day = today

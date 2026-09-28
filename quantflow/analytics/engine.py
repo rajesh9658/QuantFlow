@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from quantflow.analytics.aggregators import (
@@ -17,6 +17,7 @@ from quantflow.analytics.formulas import (
 )
 from quantflow.common.events import FillEvent, PortfolioUpdateEvent
 from quantflow.config.manager import ConfigManager
+from quantflow.core.clock import Clock, SystemClock
 from quantflow.core.interfaces import EventBus
 from quantflow.core.logging import get_logger
 
@@ -28,9 +29,15 @@ class AnalyticsEngine:
     Guarantees parity between live event streaming and offline backtest calculations.
     """
 
-    def __init__(self, config: ConfigManager, event_bus: EventBus) -> None:
+    def __init__(
+        self,
+        config: ConfigManager,
+        event_bus: EventBus,
+        clock: Clock | None = None,
+    ) -> None:
         self.config = config
         self.event_bus = event_bus
+        self.clock: Clock = clock or SystemClock()
         self.logger = get_logger("analytics_engine")
 
         # Configuration options
@@ -103,7 +110,7 @@ class AnalyticsEngine:
         ts: datetime = (
             getattr(event, "timestamp_received", None)
             or getattr(event, "timestamp", None)
-            or datetime.now(UTC)
+            or self.clock.now()
         )
         day_key = ts.date().isoformat()
 

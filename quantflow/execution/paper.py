@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -14,6 +13,7 @@ from quantflow.common.events import (
     OrderEvent,
 )
 from quantflow.config.manager import ConfigManager
+from quantflow.core.clock import Clock, SystemClock
 from quantflow.core.interfaces import EventBus, ExecutionEngine
 from quantflow.core.logging import get_logger
 from quantflow.database.models import OrderStatus
@@ -36,6 +36,8 @@ class PaperExecutionHandler(ExecutionEngine):
         config: ConfigManager | None = None,
         event_bus: EventBus | None = None,
         order_books: dict[str, LocalOrderBook] | None = None,
+        session_factory_or_clock: async_sessionmaker[AsyncSession] | Clock | None = None,
+        clock: Clock | None = None,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
     ) -> None:
         self.config = config if config is not None else ConfigManager()
@@ -43,6 +45,13 @@ class PaperExecutionHandler(ExecutionEngine):
         self.order_books: dict[str, LocalOrderBook] = (
             order_books if order_books is not None else {}
         )
+
+        if isinstance(session_factory_or_clock, Clock):
+            clock = session_factory_or_clock
+        elif session_factory_or_clock is not None:
+            session_factory = session_factory_or_clock
+
+        self.clock: Clock = clock or SystemClock()
         self.session_factory = session_factory
 
         self._pending_orders: dict[str, OrderEvent] = {}
@@ -89,7 +98,7 @@ class PaperExecutionHandler(ExecutionEngine):
                 return
 
             fee_schedule = FeeSchedule.from_config(self.config, order.symbol)
-            now_ts = datetime.now(UTC)
+            now_ts = self.clock.now()
 
             result: FillSimulationResult = simulate_fill(
                 order=order,

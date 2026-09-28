@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Any
 
-from quantflow.common.events import Event, MarketDataEvent, SignalEvent
+from quantflow.common.events import Event, MarketDataEvent
+from quantflow.core.clock import Clock
 from quantflow.core.event_bus import AsyncEventBus
 from quantflow.core.interfaces import Strategy
 
@@ -28,9 +27,11 @@ class StrategyEngine:
         self,
         event_bus: AsyncEventBus,
         strategies: dict[str, Strategy] | None = None,
+        clock: Clock | None = None,
     ) -> None:
         self._bus = event_bus
         self._strategies: dict[str, Strategy] = strategies or {}
+        self.clock = clock
         self._running = False
 
     # ── lifecycle ────────────────────────────────────────────────
@@ -42,6 +43,9 @@ class StrategyEngine:
         if self._running:
             return
         self._running = True
+        for strat in self._strategies.values():
+            if hasattr(strat, "initialize"):
+                await strat.initialize(clock=self.clock)
         await self._bus.subscribe(MarketDataEvent, self._dispatch)
         logger.info(
             "strategy engine started with %d strategies", len(self._strategies)

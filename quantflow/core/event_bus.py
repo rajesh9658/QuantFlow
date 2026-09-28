@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 from quantflow.common.events import Event
+from quantflow.core.clock import Clock
 from quantflow.core.interfaces import EventBus
 
 T = TypeVar("T", bound=Event)
@@ -15,12 +16,17 @@ EventHandler = Callable[[T], Awaitable[None]]
 class AsyncEventBus(EventBus):
     """In-process asyncio implementation of EventBus with backpressure safety."""
 
-    def __init__(self, default_queue_maxsize: int = 1000) -> None:
+    def __init__(
+        self,
+        default_queue_maxsize: int = 1000,
+        clock: Clock | None = None,
+    ) -> None:
         self._subscribers: dict[type[Event], list[EventHandler[Any]]] = defaultdict(
             list
         )
         self._queues: dict[type[Event], list[asyncio.Queue[Any]]] = defaultdict(list)
         self._default_queue_maxsize = default_queue_maxsize
+        self.clock = clock
         self._lock = asyncio.Lock()
 
     async def subscribe(
@@ -94,3 +100,8 @@ class AsyncEventBus(EventBus):
                 q.put_nowait(event)
             except asyncio.QueueFull:
                 await q.put(event)
+
+
+# Alias for spec parity
+InMemoryEventBus = AsyncEventBus
+

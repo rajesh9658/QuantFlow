@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from quantflow.core.clock import Clock, SystemClock
 from quantflow.database.models import (
     ErrorLog,
     Execution,
@@ -40,14 +41,22 @@ def _to_uuid(val: uuid.UUID | str) -> uuid.UUID:
         return uuid.uuid5(uuid.NAMESPACE_DNS, str(val))
 
 
+class BaseRepository:
+    """Base repository providing session and clock-aware timestamping."""
+
+    def __init__(self, session: AsyncSession, clock: Clock | None = None) -> None:
+        self.session = session
+        self.clock: Clock = clock or SystemClock()
+
+    def _now(self) -> datetime:
+        return self.clock.now()
+
+
 # ── 1. Strategy Repository ───────────────────────────────────────
 
 
-class StrategyRepository:
+class StrategyRepository(BaseRepository):
     """Repository for Strategy aggregate."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
 
     async def get_by_name(self, name: str) -> Strategy | None:
         """Fetch a strategy definition by its unique name."""
@@ -77,7 +86,7 @@ class StrategyRepository:
             if config is not None:
                 strat.config = config
             strat.active = active
-            strat.updated_at = datetime.now(UTC)
+            strat.updated_at = self._now()
         await self.session.flush()
         return strat
 
@@ -91,11 +100,8 @@ class StrategyRepository:
 # ── 2. Order Repository ──────────────────────────────────────────
 
 
-class OrderRepository:
+class OrderRepository(BaseRepository):
     """Repository for Order aggregate."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
 
     async def create(
         self,
@@ -159,7 +165,7 @@ class OrderRepository:
             order.filled_quantity = filled_quantity
         if avg_price is not None:
             order.avg_price = avg_price
-        order.updated_at = datetime.now(UTC)
+        order.updated_at = self._now()
         await self.session.flush()
         return order
 
@@ -186,11 +192,8 @@ class OrderRepository:
 # ── 3. Execution (Fill) Repository ───────────────────────────────
 
 
-class ExecutionRepository:
+class ExecutionRepository(BaseRepository):
     """Repository for Execution (Fill) records."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
 
     async def create(
         self,
@@ -211,9 +214,9 @@ class ExecutionRepository:
         ts_ex = (
             timestamp_exchange
             if timestamp_exchange is not None
-            else datetime.now(UTC)
+            else self._now()
         )
-        rec_at = received_at if received_at is not None else datetime.now(UTC)
+        rec_at = received_at if received_at is not None else self._now()
 
         execution = Execution(
             fill_id=f_uid,
@@ -257,11 +260,8 @@ class ExecutionRepository:
 # ── 4. Position Repository ───────────────────────────────────────
 
 
-class PositionRepository:
+class PositionRepository(BaseRepository):
     """Repository for Position aggregate state."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
 
     async def get(
         self, portfolio_id: str, symbol: str
@@ -309,7 +309,7 @@ class PositionRepository:
                 pos.unrealized_pnl = unrealized_pnl
             if realized_pnl is not None:
                 pos.realized_pnl = realized_pnl
-            pos.updated_at = datetime.now(UTC)
+            pos.updated_at = self._now()
         await self.session.flush()
         return pos
 
@@ -327,11 +327,8 @@ class PositionRepository:
 # ── 5. Portfolio Repository ──────────────────────────────────────
 
 
-class PortfolioRepository:
+class PortfolioRepository(BaseRepository):
     """Repository for Portfolio financial summary state."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
 
     async def get(
         self, portfolio_id: str = "quantflow_main"
@@ -370,7 +367,7 @@ class PortfolioRepository:
             port.total_exposure = total_exposure
             port.realized_pnl = realized_pnl
             port.unrealized_pnl = unrealized_pnl
-            port.updated_at = datetime.now(UTC)
+            port.updated_at = self._now()
         await self.session.flush()
         return port
 
@@ -378,11 +375,8 @@ class PortfolioRepository:
 # ── 6. Ticker Repository ─────────────────────────────────────────
 
 
-class TickerRepository:
+class TickerRepository(BaseRepository):
     """Repository for Ticker tick data."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
 
     async def create(
         self,
@@ -397,7 +391,7 @@ class TickerRepository:
         received_at: datetime | None = None,
     ) -> Ticker:
         """Persist a single ticker price tick."""
-        rec_at = received_at if received_at is not None else datetime.now(UTC)
+        rec_at = received_at if received_at is not None else self._now()
         ticker = Ticker(
             symbol=symbol,
             bid=bid,
@@ -419,7 +413,7 @@ class TickerRepository:
         """Bulk insert ticker records."""
         instances: list[Ticker] = []
         for item in tickers_data:
-            rec_at = item.get("received_at", datetime.now(UTC))
+            rec_at = item.get("received_at", self._now())
             t = Ticker(
                 symbol=item["symbol"],
                 bid=item["bid"],
@@ -467,11 +461,8 @@ class TickerRepository:
 # ── 7. OrderBook Repository ──────────────────────────────────────
 
 
-class OrderBookRepository:
+class OrderBookRepository(BaseRepository):
     """Repository for OrderBook snapshots."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
 
     async def create(
         self,
@@ -485,7 +476,7 @@ class OrderBookRepository:
         received_at: datetime | None = None,
     ) -> OrderBook:
         """Persist an orderbook snapshot."""
-        rec_at = received_at if received_at is not None else datetime.now(UTC)
+        rec_at = received_at if received_at is not None else self._now()
         ob = OrderBook(
             symbol=symbol,
             bids=bids,
@@ -515,11 +506,8 @@ class OrderBookRepository:
 # ── 8. Signal Repository ─────────────────────────────────────────
 
 
-class SignalRepository:
+class SignalRepository(BaseRepository):
     """Repository for Strategy Signal records."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
 
     async def create(
         self,
@@ -534,7 +522,7 @@ class SignalRepository:
     ) -> Signal:
         """Persist a strategy generated signal."""
         uid = _to_uuid(event_id)
-        rec_at = received_at if received_at is not None else datetime.now(UTC)
+        rec_at = received_at if received_at is not None else self._now()
         sig = Signal(
             event_id=uid,
             strategy_name=strategy_name,
@@ -562,11 +550,8 @@ class SignalRepository:
 # ── 9. Metric Repository ─────────────────────────────────────────
 
 
-class MetricRepository:
+class MetricRepository(BaseRepository):
     """Repository for Metric time-series records."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
 
     async def record(
         self,
@@ -577,7 +562,7 @@ class MetricRepository:
         metadata: dict[str, Any] | None = None,
     ) -> Metric:
         """Record an analytical metric measurement."""
-        ts = timestamp if timestamp is not None else datetime.now(UTC)
+        ts = timestamp if timestamp is not None else self._now()
         metric = Metric(
             portfolio_id=portfolio_id,
             metric_name=metric_name,
@@ -613,11 +598,8 @@ class MetricRepository:
 # ── 10. Log & Error Repository ───────────────────────────────────
 
 
-class LogRepository:
+class LogRepository(BaseRepository):
     """Repository for operational Logs."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
 
     async def log(
         self,
@@ -630,7 +612,7 @@ class LogRepository:
     ) -> Log:
         """Persist a log entry."""
         cid = _to_uuid(correlation_id) if correlation_id else None
-        rec_at = received_at if received_at is not None else datetime.now(UTC)
+        rec_at = received_at if received_at is not None else self._now()
         log_entry = Log(
             correlation_id=cid,
             level=LogLevel(str(level)),
@@ -644,11 +626,8 @@ class LogRepository:
         return log_entry
 
 
-class ErrorLogRepository:
+class ErrorLogRepository(BaseRepository):
     """Repository for Error and Exception logs."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
 
     async def record_error(
         self,
@@ -661,7 +640,7 @@ class ErrorLogRepository:
     ) -> ErrorLog:
         """Persist an error log entry."""
         cid = _to_uuid(correlation_id) if correlation_id else None
-        rec_at = received_at if received_at is not None else datetime.now(UTC)
+        rec_at = received_at if received_at is not None else self._now()
         error = ErrorLog(
             correlation_id=cid,
             error_code=error_code,

@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
-from quantflow.common.events import Event, FillEvent, OrderEvent, SystemEvent
+from quantflow.common.events import Event, FillEvent, OrderEvent
 
 T = TypeVar("T", bound=Event)
 EventHandler = Callable[[T], Awaitable[None]]
@@ -60,6 +60,14 @@ class Strategy(ABC):
     @abstractmethod
     async def on_event(self, event: Event) -> None:
         """Handle incoming events dispatched to the strategy."""
+
+    async def initialize(
+        self,
+        config: dict[str, Any] | None = None,
+        clock: Any | None = None,
+    ) -> None:
+        """Initialize the strategy with optional configuration and injected Clock."""
+        pass
 
 
 class ExecutionEngine(ABC):

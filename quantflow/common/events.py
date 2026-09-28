@@ -74,6 +74,11 @@ class SignalEvent(Event):
     price: float | None = None
     event_type: str = "SIGNAL"
 
+    @property
+    def direction(self) -> str:
+        """Alias for side ('BUY' or 'SELL')."""
+        return self.side
+
 
 class OrderEvent(Event):
     """Order placement/submission event model."""
@@ -160,6 +165,11 @@ class ApprovedSignalEvent(Event):
     signal_strength: float = 1.0
     price: float | None = None
     event_type: str = "APPROVED_SIGNAL"
+
+    @property
+    def direction(self) -> str:
+        """Alias for side ('BUY' or 'SELL')."""
+        return self.side
 
 
 class RejectedSignalEvent(Event):

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from quantflow.common.events import OrderBookEvent, TickEvent, TradeEvent
+from quantflow.core.clock import Clock, SystemClock
 from quantflow.core.event_bus import AsyncEventBus
 from quantflow.core.logging import get_logger
 
@@ -16,7 +17,7 @@ logger = get_logger("market_data_engine")
 # ── constants ────────────────────────────────────────────────────
 
 _SYMBOL_RE = re.compile(r"^[A-Z0-9/]+$")
-_MIN_TS = datetime(2010, 1, 1, tzinfo=timezone.utc)
+_MIN_TS = datetime(2010, 1, 1, tzinfo=UTC)
 _MAX_DRIFT_S = 5  # seconds of allowed clock skew into the future
 
 
@@ -42,8 +43,13 @@ class MarketDataEngine:
     Zero trading logic — pure infrastructure.
     """
 
-    def __init__(self, event_bus: AsyncEventBus) -> None:
+    def __init__(
+        self,
+        event_bus: AsyncEventBus,
+        clock: Clock | None = None,
+    ) -> None:
         self._bus = event_bus
+        self.clock = clock or SystemClock()
         self._trackers: dict[str, _SeqTracker] = {}
         self._snapshot_cbs: dict[str, SnapshotCallback] = {}
 
@@ -63,7 +69,7 @@ class MarketDataEngine:
         ask = _float(raw, "ask")
         last = _float(raw, "last")
         volume = _float(raw, "volume", default=0.0)
-        ts = _parse_ts(raw.get("timestamp_ms") or raw.get("timestamp"))
+        ts = _parse_ts(raw.get("timestamp_ms") or raw.get("timestamp"), clock=self.clock)
 
         if not _positive(bid, "bid", symbol):
             return
@@ -74,7 +80,7 @@ class MarketDataEngine:
         if volume < 0:
             logger.warning("ticker %s: volume=%s must be >= 0", symbol, volume)
             return
-        if not _valid_ts(ts, symbol):
+        if not _valid_ts(ts, symbol, clock=self.clock):
             return
 
         await self._bus.publish(
@@ -87,6 +93,7 @@ class MarketDataEngine:
                 ask_size=_float(raw, "askVolume", default=0.0),
                 last_price=last,
                 last_size=volume,
+                timestamp=ts,
             )
         )
 
@@ -97,14 +104,14 @@ class MarketDataEngine:
             return
         bids = _norm_levels(raw.get("bids", []))
         asks = _norm_levels(raw.get("asks", []))
-        ts = _parse_ts(raw.get("timestamp_ms") or raw.get("timestamp"))
+        ts = _parse_ts(raw.get("timestamp_ms") or raw.get("timestamp"), clock=self.clock)
 
         if not bids and not asks:
             logger.warning("orderbook %s: empty book", symbol)
             return
         if not _valid_levels(bids, symbol) or not _valid_levels(asks, symbol):
             return
-        if not _valid_ts(ts, symbol):
+        if not _valid_ts(ts, symbol, clock=self.clock):
             return
 
         # sequence validation
@@ -121,6 +128,7 @@ class MarketDataEngine:
                 exchange="binance",
                 bids=bids,
                 asks=asks,
+                timestamp=ts,
             )
         )
 
@@ -130,13 +138,13 @@ class MarketDataEngine:
         price = _float(raw, "price")
         size = _float(raw, "size", default=_float(raw, "amount"))
         trade_id = str(raw.get("trade_id", raw.get("id", "")))
-        ts = _parse_ts(raw.get("timestamp_ms") or raw.get("timestamp"))
+        ts = _parse_ts(raw.get("timestamp_ms") or raw.get("timestamp"), clock=self.clock)
 
         if not _positive(price, "price", symbol):
             return
         if not _positive(size, "size", symbol):
             return
-        if not _valid_ts(ts, symbol):
+        if not _valid_ts(ts, symbol, clock=self.clock):
             return
 
         await self._bus.publish(
@@ -146,6 +154,7 @@ class MarketDataEngine:
                 price=price,
                 size=size,
                 trade_id=trade_id,
+                timestamp=ts,
             )
         )
 
@@ -202,9 +211,9 @@ def _float(d: dict[str, Any], key: str, default: float = 0.0) -> float:
         return default
 
 
-def _parse_ts(v: Any) -> datetime:
+def _parse_ts(v: Any, clock: Clock | None = None) -> datetime:
     if v is None:
-        return datetime.now(UTC)
+        return clock.now() if clock else datetime.now(UTC)
     if isinstance(v, datetime):
         return v if v.tzinfo else v.replace(tzinfo=UTC)
     if isinstance(v, (int, float)):
@@ -216,7 +225,7 @@ def _parse_ts(v: Any) -> datetime:
         return datetime.fromtimestamp(v / 1000, tz=UTC)
     if isinstance(v, str):
         return datetime.fromisoformat(v.replace("Z", "+00:00"))
-    return datetime.now(UTC)
+    return clock.now() if clock else datetime.now(UTC)
 
 
 def _valid_symbol(sym: str) -> bool:
@@ -233,11 +242,11 @@ def _positive(val: float, name: str, sym: str) -> bool:
     return True
 
 
-def _valid_ts(ts: datetime, ctx: str) -> bool:
+def _valid_ts(ts: datetime, ctx: str, clock: Clock | None = None) -> bool:
     if ts < _MIN_TS:
         logger.warning("%s: timestamp %s before genesis", ctx, ts)
         return False
-    now = datetime.now(UTC)
+    now = clock.now() if clock else datetime.now(UTC)
     if (ts - now).total_seconds() > _MAX_DRIFT_S:
         logger.warning("%s: timestamp %s too far in future", ctx, ts)
         return False

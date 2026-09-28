@@ -125,3 +125,15 @@ uv.lock
 ehthumbs.db
 Thumbs.db
 desktop.ini
+
+# ------------------------------------------------------------------------------
+# Node & Frontend Build Artifacts
+# ------------------------------------------------------------------------------
+node_modules/
+*/node_modules/
+.npm/
+dist/
+*/dist/
+.vite/
+*/.vite/
+
