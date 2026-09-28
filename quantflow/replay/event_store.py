@@ -268,9 +268,7 @@ class PostgresEventStoreReader(EventStoreReader):
                 res_sigs = await session.execute(stmt_sigs)
                 for sig in res_sigs.scalars():
                     dir_val = getattr(sig, "direction", "buy")
-                    side_val = (
-                        dir_val.value if hasattr(dir_val, "value") else str(dir_val)
-                    )
+                    side_val = getattr(dir_val, "value", str(dir_val))
                     events.append(
                         SignalEvent(
                             event_id=str(sig.event_id),
