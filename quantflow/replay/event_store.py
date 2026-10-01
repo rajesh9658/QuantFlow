@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -51,14 +51,14 @@ class EventStoreReader(ABC):
 class InMemoryEventStoreReader(EventStoreReader):
     """In-memory event store reader for fixtures, unit tests, and replay."""
 
-    def __init__(self, events: list[Event] | None = None) -> None:
+    def __init__(self, events: Sequence[Event] | None = None) -> None:
         self._events: list[Event] = list(events or [])
 
     def add_event(self, event: Event) -> None:
         """Add a single event to the in-memory store."""
         self._events.append(event)
 
-    def add_events(self, events: list[Event]) -> None:
+    def add_events(self, events: Sequence[Event]) -> None:
         """Add multiple events to the in-memory store."""
         self._events.extend(events)
 

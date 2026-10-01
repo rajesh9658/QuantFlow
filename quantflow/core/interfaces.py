@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from quantflow.common.events import Event, FillEvent, OrderEvent
 
