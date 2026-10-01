@@ -22,6 +22,8 @@ class Event(BaseModel):
     timestamp: datetime = Field(default_factory=_default_utc_now)
     timestamp_received: datetime | None = None
     event_type: str = "EVENT"
+    schema_version: int = 1
+    source: str = ""
 
     model_config = {"frozen": True}
 
@@ -36,7 +38,19 @@ class MarketDataEvent(Event):
 
     symbol: str
     exchange: str = ""
+    exchange_id: str = ""
     event_type: str = "MARKET_DATA"
+    schema_version: int = 2
+
+    def model_post_init(self, __context: Any) -> None:
+        exch = self.exchange_id or self.exchange or self.source
+        if exch:
+            if not self.exchange:
+                object.__setattr__(self, "exchange", exch)
+            if not self.exchange_id:
+                object.__setattr__(self, "exchange_id", exch)
+            if not self.source:
+                object.__setattr__(self, "source", exch)
 
 
 class TickEvent(MarketDataEvent):
@@ -68,11 +82,13 @@ class SignalEvent(Event):
 
     strategy_id: str
     symbol: str
+    exchange_id: str = "binance"
     side: str  # BUY or SELL
     quantity: float
     signal_strength: float = 1.0
     price: float | None = None
     event_type: str = "SIGNAL"
+    schema_version: int = 2
 
     @property
     def direction(self) -> str:
@@ -86,12 +102,14 @@ class OrderEvent(Event):
     order_id: str = Field(default_factory=_default_uuid)
     strategy_id: str
     symbol: str
+    exchange_id: str = "binance"
     side: str  # BUY or SELL
     order_type: str  # MARKET or LIMIT
     quantity: float
     price: float | None = None
     time_in_force: str = "GTC"
     event_type: str = "ORDER"
+    schema_version: int = 2
 
 
 class FillEvent(Event):
@@ -105,11 +123,23 @@ class FillEvent(Event):
     fill_price: float
     commission: float = 0.0
     exchange: str = ""
+    exchange_id: str = ""
     realized_pnl: float = 0.0
     expected_price: float | None = None
     timestamp_exchange: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     event_type: str = "FILL"
+    schema_version: int = 2
+
+    def model_post_init(self, __context: Any) -> None:
+        exch = self.exchange_id or self.exchange or self.source
+        if exch:
+            if not self.exchange:
+                object.__setattr__(self, "exchange", exch)
+            if not self.exchange_id:
+                object.__setattr__(self, "exchange_id", exch)
+            if not self.source:
+                object.__setattr__(self, "source", exch)
 
     @property
     def price(self) -> float:
@@ -160,11 +190,13 @@ class ApprovedSignalEvent(Event):
     signal_id: str
     strategy_id: str
     symbol: str
+    exchange_id: str = "binance"
     side: str  # BUY or SELL
     quantity: float
     signal_strength: float = 1.0
     price: float | None = None
     event_type: str = "APPROVED_SIGNAL"
+    schema_version: int = 2
 
     @property
     def direction(self) -> str:
@@ -178,8 +210,10 @@ class RejectedSignalEvent(Event):
     signal_id: str
     strategy_id: str
     symbol: str
+    exchange_id: str = "binance"
     reason: str
     event_type: str = "REJECTED_SIGNAL"
+    schema_version: int = 2
 
 
 class PortfolioUpdateEvent(Event):
@@ -217,5 +251,3 @@ class EventType:
     APPROVED_SIGNAL = ApprovedSignalEvent
     REJECTED_SIGNAL = RejectedSignalEvent
     PORTFOLIO_UPDATE = PortfolioUpdateEvent
-
-

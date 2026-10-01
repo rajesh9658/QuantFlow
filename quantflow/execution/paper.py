@@ -36,9 +36,13 @@ class PaperExecutionHandler(ExecutionEngine):
         config: ConfigManager | None = None,
         event_bus: EventBus | None = None,
         order_books: dict[str, LocalOrderBook] | None = None,
-        session_factory_or_clock: async_sessionmaker[AsyncSession] | Clock | None = None,
+        session_factory_or_clock: async_sessionmaker[AsyncSession]
+        | Clock
+        | None = None,
         clock: Clock | None = None,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
+        registry: Any | None = None,
+        symbol_mapper: Any | None = None,
     ) -> None:
         self.config = config if config is not None else ConfigManager()
         self.event_bus = event_bus
@@ -47,12 +51,21 @@ class PaperExecutionHandler(ExecutionEngine):
         )
 
         if isinstance(session_factory_or_clock, Clock):
-            clock = session_factory_or_clock
+            clock_val = session_factory_or_clock
+            if clock is not None and not isinstance(clock, Clock):
+                registry = clock
+            clock = clock_val
         elif session_factory_or_clock is not None:
             session_factory = session_factory_or_clock
 
+        if session_factory is not None and not callable(session_factory):
+            symbol_mapper = session_factory
+            session_factory = None
+
         self.clock: Clock = clock or SystemClock()
         self.session_factory = session_factory
+        self.registry = registry
+        self.symbol_mapper = symbol_mapper
 
         self._pending_orders: dict[str, OrderEvent] = {}
         self._order_statuses: dict[str, str] = {}
@@ -90,6 +103,16 @@ class PaperExecutionHandler(ExecutionEngine):
 
     async def submit_order(self, order: OrderEvent) -> None:
         """Execute an order against the current local orderbook snapshot."""
+        if self.registry:
+            adapter = self.registry.get(order.exchange_id)
+            if hasattr(adapter, "place_order"):
+                try:
+                    await adapter.place_order(order)
+                except NotImplementedError:
+                    pass
+                except Exception as e:
+                    logger.debug("Adapter order placement note: %s", e)
+
         async with self._lock:
             book = self.order_books.get(order.symbol)
             if not book:
@@ -191,9 +214,7 @@ class PaperExecutionHandler(ExecutionEngine):
                             )
                             await session.commit()
                     except Exception as e:
-                        logger.error(
-                            "Failed to update cancelled order status: %s", e
-                        )
+                        logger.error("Failed to update cancelled order status: %s", e)
             else:
                 logger.warning("Order %s not found or already filled", order_id)
 
@@ -207,6 +228,9 @@ class PaperExecutionHandler(ExecutionEngine):
             new_order = OrderEvent(
                 strategy_id=kwargs.get("strategy_id", old_order.strategy_id),
                 symbol=kwargs.get("symbol", old_order.symbol),
+                exchange_id=kwargs.get(
+                    "exchange_id", getattr(old_order, "exchange_id", "binance")
+                ),
                 side=kwargs.get("side", old_order.side),
                 order_type=kwargs.get("order_type", old_order.order_type),
                 quantity=float(kwargs.get("quantity", old_order.quantity)),
@@ -244,6 +268,7 @@ class PaperExecutionHandler(ExecutionEngine):
         order = OrderEvent(
             strategy_id=event.strategy_id,
             symbol=event.symbol,
+            exchange_id=getattr(event, "exchange_id", "binance"),
             side=event.side,
             order_type=order_type,
             quantity=event.quantity,

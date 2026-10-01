@@ -274,6 +274,7 @@ class PostgresEventStoreReader(EventStoreReader):
                             event_id=str(sig.event_id),
                             strategy_id=sig.strategy_name,
                             symbol=sig.symbol,
+                            exchange_id=getattr(sig, "exchange_id", getattr(sig, "exchange", "binance")),
                             side=side_val.upper(),
                             quantity=1.0,
                             price=None,

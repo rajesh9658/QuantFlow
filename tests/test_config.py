@@ -1,6 +1,7 @@
 """Tests for ConfigManager and SecretsProvider."""
 
 from pathlib import Path
+
 import pytest
 
 from quantflow.config.manager import ConfigManager
@@ -72,3 +73,66 @@ def test_config_manager_get_secret() -> None:
 
     with pytest.raises(SecretNotFoundError):
         config.get_secret("NON_EXISTENT_SECRET")
+
+
+def test_multi_exchange_schema_validation() -> None:
+    """Verify ConfigManager validates multi-exchange list schema."""
+    from quantflow.config.manager import ConfigValidationError
+
+    # 1. Valid multi-exchange config
+    valid_cfg = {
+        "exchanges": [
+            {
+                "exchange_id": "binance",
+                "type": "binance",
+                "enabled": True,
+                "symbols": {"BTC/USDT": "BTCUSDT"},
+            },
+            {
+                "exchange_id": "bybit",
+                "type": "bybit",
+                "enabled": False,
+            },
+        ]
+    }
+    cfg = ConfigManager(defaults=valid_cfg)
+    assert len(cfg.get("exchanges")) == 2
+
+    # 2. exchanges not a list
+    with pytest.raises(ConfigValidationError, match="must be a list"):
+        ConfigManager(defaults={"exchanges": "invalid_not_list"})
+
+    # 3. exchange entry missing exchange_id
+    with pytest.raises(
+        ConfigValidationError, match="missing required string 'exchange_id'"
+    ):
+        ConfigManager(defaults={"exchanges": [{"type": "binance"}]})
+
+    # 4. exchange entry missing type
+    with pytest.raises(ConfigValidationError, match="missing required string 'type'"):
+        ConfigManager(defaults={"exchanges": [{"exchange_id": "binance"}]})
+
+    # 5. duplicate exchange_id
+    with pytest.raises(ConfigValidationError, match="Duplicate exchange_id"):
+        ConfigManager(
+            defaults={
+                "exchanges": [
+                    {"exchange_id": "binance", "type": "binance"},
+                    {"exchange_id": "binance", "type": "binance_alt"},
+                ]
+            }
+        )
+
+    # 6. symbols not a dict
+    with pytest.raises(ConfigValidationError, match="symbols must be a dictionary"):
+        ConfigManager(
+            defaults={
+                "exchanges": [
+                    {
+                        "exchange_id": "binance",
+                        "type": "binance",
+                        "symbols": ["BTCUSDT"],
+                    }
+                ]
+            }
+        )

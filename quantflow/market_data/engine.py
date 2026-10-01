@@ -10,7 +10,10 @@ from typing import Any
 from quantflow.common.events import OrderBookEvent, TickEvent, TradeEvent
 from quantflow.core.clock import Clock, SystemClock
 from quantflow.core.event_bus import AsyncEventBus
+from quantflow.core.exchange_registry import ExchangeRegistry
 from quantflow.core.logging import get_logger
+from quantflow.market_data.raw import RawMarketData
+from quantflow.market_data.symbol_mapper import SymbolMapper
 
 logger = get_logger("market_data_engine")
 
@@ -47,10 +50,15 @@ class MarketDataEngine:
         self,
         event_bus: AsyncEventBus,
         clock: Clock | None = None,
+        symbol_mapper: SymbolMapper | None = None,
+        registry: ExchangeRegistry | None = None,
     ) -> None:
         self._bus = event_bus
         self.clock = clock or SystemClock()
-        self._trackers: dict[str, _SeqTracker] = {}
+        self.symbol_mapper = symbol_mapper
+        self.registry = registry
+        # (exchange_id, symbol) -> _SeqTracker
+        self._trackers: dict[tuple[str, str], _SeqTracker] = {}
         self._snapshot_cbs: dict[str, SnapshotCallback] = {}
 
     # ── snapshot callback registration ───────────────────────────
@@ -60,11 +68,93 @@ class MarketDataEngine:
     ) -> None:
         self._snapshot_cbs[symbol] = cb
 
+    # ── adapter subscriptions ────────────────────────────────────
+
+    async def subscribe_all(self, symbols: list[str] | None = None) -> None:
+        """Iterate the registry's adapters and subscribe each to its mapped symbols."""
+        if not self.registry:
+            return
+
+        for exchange_id in list(self.registry.get_all_status().keys()):
+            try:
+                adapter = self.registry.get(exchange_id)
+            except KeyError:
+                continue
+
+            if hasattr(adapter, "sink") and adapter.sink is None:
+                adapter.sink = self
+
+            if symbols:
+                target_symbols = symbols
+            elif self.symbol_mapper:
+                target_symbols = self.symbol_mapper.supported_symbols(exchange_id)
+            else:
+                target_symbols = []
+
+            if not target_symbols:
+                continue
+
+            if self.symbol_mapper:
+                native_symbols = [
+                    self.symbol_mapper.to_native(sym, exchange_id)
+                    for sym in target_symbols
+                    if self.symbol_mapper.is_supported(sym, exchange_id)
+                ]
+            else:
+                native_symbols = target_symbols
+
+            if native_symbols and hasattr(adapter, "subscribe_market_data"):
+                await adapter.subscribe_market_data(native_symbols)
+
+    async def subscribe_symbols(self, symbols: list[str]) -> None:
+        """Subscribe to streaming market data for given symbols across adapters."""
+        await self.subscribe_all(symbols)
+
+    async def start(self, symbols: list[str] | None = None) -> None:
+        """Start data ingestion across all registered adapters."""
+        await self.subscribe_all(symbols)
+
+    async def stop(self) -> None:
+        """Stop data ingestion service."""
+        pass
+
+    # ── RawMarketData Sink (entrypoint for adapters) ─────────────
+
+    async def on_raw_market_data(self, raw: RawMarketData) -> None:
+        """Single entrypoint for all adapters. Dispatches by kind."""
+        try:
+            if self.symbol_mapper:
+                canonical = self.symbol_mapper.to_canonical(
+                    raw.symbol_native, raw.exchange_id
+                )
+            else:
+                canonical = raw.symbol_native
+        except Exception as e:
+            logger.warning(
+                f"Unmapped symbol {raw.symbol_native!r} on {raw.exchange_id}: {e}"
+            )
+            return
+
+        if raw.kind == "ticker":
+            await self.process_ticker(canonical, raw.data, exchange_id=raw.exchange_id)
+        elif raw.kind == "orderbook":
+            await self.process_orderbook(canonical, raw.data, exchange_id=raw.exchange_id)
+        elif raw.kind == "trade":
+            await self.process_trade(canonical, raw.data, exchange_id=raw.exchange_id)
+        else:
+            logger.warning("Unknown raw kind: %s", raw.kind)
+
     # ── public entry points ──────────────────────────────────────
 
-    async def process_ticker(self, symbol: str, raw: dict[str, Any]) -> None:
+    async def process_ticker(
+        self,
+        symbol: str,
+        raw: dict[str, Any],
+        exchange_id: str | None = None,
+    ) -> None:
         if not _valid_symbol(symbol):
             return
+        eid = exchange_id or raw.get("exchange_id") or "binance"
         bid = _float(raw, "bid")
         ask = _float(raw, "ask")
         last = _float(raw, "last")
@@ -86,7 +176,9 @@ class MarketDataEngine:
         await self._bus.publish(
             TickEvent(
                 symbol=symbol,
-                exchange="binance",
+                exchange=eid,
+                exchange_id=eid,
+                source=eid,
                 bid_price=bid,
                 ask_price=ask,
                 bid_size=_float(raw, "bidVolume", default=0.0),
@@ -98,10 +190,14 @@ class MarketDataEngine:
         )
 
     async def process_orderbook(
-        self, symbol: str, raw: dict[str, Any]
+        self,
+        symbol: str,
+        raw: dict[str, Any],
+        exchange_id: str | None = None,
     ) -> None:
         if not _valid_symbol(symbol):
             return
+        eid = exchange_id or raw.get("exchange_id") or "binance"
         bids = _norm_levels(raw.get("bids", []))
         asks = _norm_levels(raw.get("asks", []))
         ts = _parse_ts(raw.get("timestamp_ms") or raw.get("timestamp"), clock=self.clock)
@@ -118,23 +214,31 @@ class MarketDataEngine:
         u: int | None = raw.get("u")
         pu: int | None = raw.get("pu")
         if u is not None:
-            ok = await self._check_seq(symbol, u, pu)
+            ok = await self._check_seq(symbol, u, pu, exchange_id=eid)
             if not ok:
                 return
 
         await self._bus.publish(
             OrderBookEvent(
                 symbol=symbol,
-                exchange="binance",
+                exchange=eid,
+                exchange_id=eid,
+                source=eid,
                 bids=bids,
                 asks=asks,
                 timestamp=ts,
             )
         )
 
-    async def process_trade(self, symbol: str, raw: dict[str, Any]) -> None:
+    async def process_trade(
+        self,
+        symbol: str,
+        raw: dict[str, Any],
+        exchange_id: str | None = None,
+    ) -> None:
         if not _valid_symbol(symbol):
             return
+        eid = exchange_id or raw.get("exchange_id") or "binance"
         price = _float(raw, "price")
         size = _float(raw, "size", default=_float(raw, "amount"))
         trade_id = str(raw.get("trade_id", raw.get("id", "")))
@@ -150,7 +254,9 @@ class MarketDataEngine:
         await self._bus.publish(
             TradeEvent(
                 symbol=symbol,
-                exchange="binance",
+                exchange=eid,
+                exchange_id=eid,
+                source=eid,
                 price=price,
                 size=size,
                 trade_id=trade_id,
@@ -161,9 +267,14 @@ class MarketDataEngine:
     # ── sequence check ───────────────────────────────────────────
 
     async def _check_seq(
-        self, symbol: str, u: int, pu: int | None
+        self,
+        symbol: str,
+        u: int,
+        pu: int | None,
+        exchange_id: str = "binance",
     ) -> bool:
-        tracker = self._trackers.setdefault(symbol, _SeqTracker())
+        key = (exchange_id, symbol)
+        tracker = self._trackers.setdefault(key, _SeqTracker())
 
         # first event
         if tracker.last_u is None:
@@ -173,17 +284,17 @@ class MarketDataEngine:
         # duplicate / stale
         if u <= tracker.last_u:
             logger.debug(
-                "orderbook %s: stale u=%d <= last=%d, dropping",
-                symbol, u, tracker.last_u,
+                "orderbook %s/%s: stale u=%d <= last=%d, dropping",
+                exchange_id, symbol, u, tracker.last_u,
             )
             return False
 
         # gap (pu provided and doesn't match)
         if pu is not None and pu != tracker.last_u:
             logger.warning(
-                "orderbook %s: gap detected, expected pu=%d got %d (u=%d). "
+                "orderbook %s/%s: gap detected, expected pu=%d got %d (u=%d). "
                 "Triggering resync.",
-                symbol, tracker.last_u, pu, u,
+                exchange_id, symbol, tracker.last_u, pu, u,
             )
             cb = self._snapshot_cbs.get(symbol)
             if cb:

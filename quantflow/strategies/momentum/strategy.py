@@ -35,6 +35,7 @@ class SimpleMomentumStrategy(Strategy):
         self._bus = event_bus
         self._clock = clock
         self._symbol: str = cfg.get("symbol", "BTC/USDT")
+        self._exchange_id: str | None = cfg.get("exchange_id")
         self._period: int = cfg.get("period", 20)
         self._threshold: float = cfg.get("threshold", 0.02)
 
@@ -57,6 +58,8 @@ class SimpleMomentumStrategy(Strategy):
         cfg = config or {}
         if "symbol" in cfg:
             self._symbol = cfg["symbol"]
+        if "exchange_id" in cfg:
+            self._exchange_id = cfg["exchange_id"]
         if "period" in cfg:
             self._period = cfg["period"]
             self._prices = deque(maxlen=self._period + 1)
@@ -75,6 +78,12 @@ class SimpleMomentumStrategy(Strategy):
         self._last_event_id = getattr(event, "event_id", None)
 
         if event.symbol != self._symbol:
+            return
+
+        ev_exchange = getattr(event, "exchange_id", None) or getattr(
+            event, "exchange", None
+        )
+        if self._exchange_id and ev_exchange and ev_exchange != self._exchange_id:
             return
 
         price = event.last_price
@@ -102,9 +111,11 @@ class SimpleMomentumStrategy(Strategy):
             return  # already in this direction
         self._last_side = side
 
+        sig_exchange = self._exchange_id or ev_exchange or "binance"
         sig_kwargs: dict[str, Any] = {
             "strategy_id": self.get_name(),
             "symbol": self._symbol,
+            "exchange_id": sig_exchange,
             "side": side,
             "quantity": 1.0,
             "signal_strength": min(abs(ret) / self._threshold, 1.0),

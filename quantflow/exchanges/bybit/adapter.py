@@ -1,4 +1,4 @@
-"""Binance exchange adapter using ccxt for REST and streaming."""
+"""Bybit exchange adapter using ccxt for REST and streaming."""
 
 from __future__ import annotations
 
@@ -31,8 +31,8 @@ class ConnectionState(enum.StrEnum):
     DISCONNECTED = "DISCONNECTED"
 
 
-class BinanceAdapter(ExchangeAdapter):
-    """Binance adapter with 3-state reconnect machine and paper-mode guard.
+class BybitAdapter(ExchangeAdapter):
+    """Bybit adapter with 3-state reconnect machine and paper-mode guard.
 
     Every state transition emits a ``SystemEvent`` via the event bus so
     external observers (health checks, dashboards) can react.
@@ -42,7 +42,7 @@ class BinanceAdapter(ExchangeAdapter):
         self,
         event_bus: AsyncEventBus | None = None,
         *,
-        exchange_id: str = "binance",
+        exchange_id: str = "bybit",
         mode: str = "paper",
         api_key: str = "",
         api_secret: str = "",
@@ -73,7 +73,7 @@ class BinanceAdapter(ExchangeAdapter):
         self._max_delay = max_delay
 
         self._state = ConnectionState.DISCONNECTED
-        self._exchange: ccxt.binance | None = None
+        self._exchange: ccxt.bybit | None = None
         self._running = False
         self._tasks: list[asyncio.Task[None]] = []
         self._subscribed_symbols: set[str] = set()
@@ -103,7 +103,7 @@ class BinanceAdapter(ExchangeAdapter):
 
     # ── exchange lifecycle ───────────────────────────────────────
 
-    def _make_exchange(self) -> ccxt.binance:
+    def _make_exchange(self) -> ccxt.bybit:
         opts: dict[str, Any] = {
             "apiKey": self._api_key,
             "secret": self._api_secret,
@@ -111,7 +111,7 @@ class BinanceAdapter(ExchangeAdapter):
         }
         if self._mode == "paper":
             opts["sandbox"] = True
-        return ccxt.binance(opts)
+        return ccxt.bybit(opts)
 
     async def connect(self) -> None:
         if self._state == ConnectionState.CONNECTED:
@@ -194,11 +194,11 @@ class BinanceAdapter(ExchangeAdapter):
                 symbol_native=symbol,
                 kind="ticker",
                 data={
-                    "bid": float(t.get("bid") or 0.0),
-                    "ask": float(t.get("ask") or 0.0),
-                    "last": float(t.get("last") or 0.0),
-                    "volume": float(t.get("baseVolume") or 0.0),
-                    "timestamp_ms": int(t.get("timestamp") or 0),
+                    "bid": float(t.get("bid") or t.get("bid1Price") or 0.0),
+                    "ask": float(t.get("ask") or t.get("ask1Price") or 0.0),
+                    "last": float(t.get("last") or t.get("lastPrice") or 0.0),
+                    "volume": float(t.get("baseVolume") or t.get("volume24h") or 0.0),
+                    "timestamp_ms": int(t.get("timestamp") or t.get("ts") or 0),
                 },
                 received_at=now,
             )
@@ -218,7 +218,7 @@ class BinanceAdapter(ExchangeAdapter):
                 data={
                     "bids": ob.get("bids") or [],
                     "asks": ob.get("asks") or [],
-                    "timestamp_ms": int(ob.get("timestamp") or 0),
+                    "timestamp_ms": int(ob.get("timestamp") or ob.get("ts") or 0),
                 },
                 received_at=now,
             )
@@ -239,9 +239,9 @@ class BinanceAdapter(ExchangeAdapter):
                 kind="trade",
                 data={
                     "price": float(tr.get("price") or 0.0),
-                    "size": float(tr.get("amount") or 0.0),
-                    "trade_id": str(tr.get("id") or ""),
-                    "timestamp_ms": int(tr.get("timestamp") or 0),
+                    "size": float(tr.get("amount") or tr.get("size") or 0.0),
+                    "trade_id": str(tr.get("id") or tr.get("trade_id") or ""),
+                    "timestamp_ms": int(tr.get("timestamp") or tr.get("ts") or 0),
                 },
                 received_at=now,
             )
@@ -283,9 +283,6 @@ class BinanceAdapter(ExchangeAdapter):
             await self._exchange.load_markets()
             self._retry_count = 0
             await self._set_state(ConnectionState.CONNECTED, "reconnected")
-            # Fresh orderbook snapshot is requested automatically by
-            # the next watch_order_book iteration (ccxt fetches snapshot
-            # on first call after new client).
             return True
         except Exception:
             logger.exception("reconnect attempt %d failed", self._retry_count)
@@ -327,7 +324,7 @@ class BinanceAdapter(ExchangeAdapter):
 
 
 def _ticker_to_event(
-    symbol: str, t: dict[str, Any], exchange_id: str = "binance"
+    symbol: str, t: dict[str, Any], exchange_id: str = "bybit"
 ) -> TickEvent:
     return TickEvent(
         symbol=symbol,
@@ -344,7 +341,7 @@ def _ticker_to_event(
 
 
 def _orderbook_to_event(
-    symbol: str, ob: dict[str, Any], exchange_id: str = "binance"
+    symbol: str, ob: dict[str, Any], exchange_id: str = "bybit"
 ) -> OrderBookEvent:
     return OrderBookEvent(
         symbol=symbol,
@@ -357,7 +354,7 @@ def _orderbook_to_event(
 
 
 def _trade_to_event(
-    symbol: str, tr: dict[str, Any], exchange_id: str = "binance"
+    symbol: str, tr: dict[str, Any], exchange_id: str = "bybit"
 ) -> TradeEvent:
     return TradeEvent(
         symbol=symbol,

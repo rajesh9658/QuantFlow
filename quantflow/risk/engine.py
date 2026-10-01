@@ -22,7 +22,7 @@ from quantflow.common.events import (
 )
 from quantflow.config.manager import ConfigManager
 from quantflow.core.clock import Clock, SystemClock
-from quantflow.core.interfaces import EventBus, RiskManager
+from quantflow.core.interfaces import EventBus, ExecutionEngine, RiskManager
 from quantflow.core.logging import get_logger
 
 logger = get_logger("risk_engine")
@@ -196,8 +196,12 @@ class PositionSizeLimitCheck(RiskCheck):
         if max_qty == float("inf") and max_notional == float("inf"):
             return True, None
 
-        qty = signal.quantity if signal.quantity > 0 else float(
-            context.config.get(f"risk.position_size_base_{signal.symbol}", 0.01)
+        qty = (
+            signal.quantity
+            if signal.quantity > 0
+            else float(
+                context.config.get(f"risk.position_size_base_{signal.symbol}", 0.01)
+            )
         )
         side = signal.side.upper()
         delta = qty if side == "BUY" else (-qty if side == "SELL" else 0.0)
@@ -240,8 +244,12 @@ class MaxExposureCheck(RiskCheck):
         if price is None or price <= 0:
             return False, REASON_MAX_EXPOSURE
 
-        qty = signal.quantity if signal.quantity > 0 else float(
-            context.config.get(f"risk.position_size_base_{signal.symbol}", 0.01)
+        qty = (
+            signal.quantity
+            if signal.quantity > 0
+            else float(
+                context.config.get(f"risk.position_size_base_{signal.symbol}", 0.01)
+            )
         )
         side = signal.side.upper()
         delta = qty if side == "BUY" else (-qty if side == "SELL" else 0.0)
@@ -329,11 +337,25 @@ class RiskEngine(RiskManager, RiskContext):
         clock_or_checks: Clock | list[RiskCheck] | None = None,
         checks: list[RiskCheck] | None = None,
         clock: Clock | None = None,
+        execution: Any | None = None,
     ) -> None:
         self.config = config if config is not None else ConfigManager()
         self.event_bus = event_bus
-        self.exchange = exchange_adapter
-        self.execution = execution_handler
+
+        if execution is not None:
+            self.execution = execution
+            self.exchange = exchange_adapter
+        elif exchange_adapter is not None and (
+            isinstance(exchange_adapter, ExecutionEngine)
+            or hasattr(exchange_adapter, "submit_order")
+        ):
+            self.execution = exchange_adapter
+            self.exchange = None
+            if isinstance(execution_handler, Clock):
+                clock = execution_handler
+        else:
+            self.exchange = exchange_adapter
+            self.execution = execution_handler
 
         # Disambiguate 5th positional arg
         if isinstance(clock_or_checks, Clock):
@@ -452,6 +474,7 @@ class RiskEngine(RiskManager, RiskContext):
                         order = OrderEvent(
                             strategy_id="risk_engine_emergency",
                             symbol=symbol,
+                            exchange_id="binance",
                             side=side,
                             order_type="MARKET",
                             quantity=abs(qty),
@@ -467,9 +490,7 @@ class RiskEngine(RiskManager, RiskContext):
 
     # ── Signal & Order Validation ────────────────────────────────
 
-    async def validate_signal(
-        self, signal: SignalEvent
-    ) -> tuple[bool, str | None]:
+    async def validate_signal(self, signal: SignalEvent) -> tuple[bool, str | None]:
         """Run all configured checks in sequence."""
         for check in self.checks:
             try:
@@ -525,11 +546,13 @@ class RiskEngine(RiskManager, RiskContext):
             return
 
         approved, reason = await self.validate_signal(event)
+        exchange_id = getattr(event, "exchange_id", "binance")
         if approved:
             app_event = ApprovedSignalEvent(
                 signal_id=event.event_id,
                 strategy_id=event.strategy_id,
                 symbol=event.symbol,
+                exchange_id=exchange_id,
                 side=event.side,
                 quantity=event.quantity,
                 signal_strength=event.signal_strength,
@@ -543,6 +566,7 @@ class RiskEngine(RiskManager, RiskContext):
                 signal_id=event.event_id,
                 strategy_id=event.strategy_id,
                 symbol=event.symbol,
+                exchange_id=exchange_id,
                 reason=reason or "RISK_CHECK_FAILED",
             )
             if self.event_bus:

@@ -45,6 +45,10 @@ def _parse_env_value(val: str) -> Any:
     return val
 
 
+class ConfigValidationError(ValueError):
+    """Raised when configuration fails schema validation."""
+
+
 class ConfigManager:
     """Layered configuration manager.
 
@@ -96,6 +100,64 @@ class ConfigManager:
                     curr = curr[part]
                 curr[key_path[-1]] = parsed_val
 
+        # 4. Validate schema
+        self.validate_schema()
+
+    def validate_schema(self) -> None:
+        """Validate configuration schema for multi-exchange structure."""
+        if "exchanges" not in self._config:
+            return
+        exchanges = self._config["exchanges"]
+        if not isinstance(exchanges, list):
+            raise ConfigValidationError("Configuration 'exchanges' must be a list")
+        seen_ids: set[str] = set()
+        for idx, exch in enumerate(exchanges):
+            if not isinstance(exch, dict):
+                raise ConfigValidationError(
+                    f"Exchange entry at index {idx} must be a dictionary"
+                )
+            if (
+                "exchange_id" not in exch
+                or not isinstance(exch["exchange_id"], str)
+                or not exch["exchange_id"].strip()
+            ):
+                raise ConfigValidationError(
+                    f"Exchange entry at index {idx} "
+                    "missing required string 'exchange_id'"
+                )
+            if (
+                "type" not in exch
+                or not isinstance(exch["type"], str)
+                or not exch["type"].strip()
+            ):
+                raise ConfigValidationError(
+                    f"Exchange entry at index {idx} missing required string 'type'"
+                )
+            eid = exch["exchange_id"]
+            if eid in seen_ids:
+                raise ConfigValidationError(
+                    f"Duplicate exchange_id '{eid}' found in exchanges configuration"
+                )
+            seen_ids.add(eid)
+            if "symbols" in exch and not isinstance(exch["symbols"], dict):
+                raise ConfigValidationError(
+                    f"Exchange '{eid}' symbols must be a dictionary"
+                )
+            if "enabled" in exch and not isinstance(exch["enabled"], bool):
+                raise ConfigValidationError(
+                    f"Exchange '{eid}' enabled must be a boolean"
+                )
+            if "reconnect" in exch and not isinstance(exch["reconnect"], dict):
+                raise ConfigValidationError(
+                    f"Exchange '{eid}' reconnect must be a dictionary"
+                )
+            if "rate_limit_overrides" in exch and not isinstance(
+                exch["rate_limit_overrides"], dict
+            ):
+                raise ConfigValidationError(
+                    f"Exchange '{eid}' rate_limit_overrides must be a dictionary"
+                )
+
     def get(self, key: str, default: Any = None) -> Any:
         """Retrieve a configuration option, supporting dot notation for nested keys."""
         parts = key.split(".")
@@ -111,8 +173,6 @@ class ConfigManager:
         """Retrieve a float configuration value, casting if necessary."""
         val = self.get(key, default)
         return float(val) if val is not None else default
-
-
 
     def get_int(self, key: str, default: int = 0) -> int:
         """Retrieve an integer configuration value, casting if necessary."""
