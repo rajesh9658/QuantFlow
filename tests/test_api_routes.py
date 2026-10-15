@@ -263,3 +263,38 @@ def test_get_metrics(client: TestClient) -> None:
     assert "avg_slippage" in metrics
     assert "avg_latency" in metrics
     assert "max_drawdown" in metrics
+
+
+def test_api_key_authentication_enforced(client: TestClient) -> None:
+    """Verify mutation endpoints enforce API key authentication when configured."""
+    from quantflow.config.manager import ConfigManager
+
+    # Configure APIState with a required API key
+    cfg = ConfigManager(defaults={"api": {"key": "secret-token-123"}})
+    set_api_state(APIState(config=cfg))
+
+    # 1. Calling mutation endpoint without header must fail with 401
+    resp_no_key = client.post(
+        "/api/risk/emergency-stop",
+        json={"enabled": True, "trigger": "test"},
+    )
+    assert resp_no_key.status_code == 401
+    assert "Invalid or missing API key" in resp_no_key.json()["detail"]
+
+    # 2. Calling with wrong key must fail with 401
+    resp_bad_key = client.post(
+        "/api/risk/emergency-stop",
+        json={"enabled": True, "trigger": "test"},
+        headers={"X-API-Key": "wrong-token"},
+    )
+    assert resp_bad_key.status_code == 401
+
+    # 3. Calling with correct key must succeed with 200
+    resp_ok = client.post(
+        "/api/risk/emergency-stop",
+        json={"enabled": True, "trigger": "test"},
+        headers={"X-API-Key": "secret-token-123"},
+    )
+    assert resp_ok.status_code == 200
+    assert resp_ok.json()["status"] == "activated"
+

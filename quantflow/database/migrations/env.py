@@ -1,6 +1,7 @@
 """Alembic environment configuration supporting async engines."""
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -24,9 +25,24 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def get_database_url() -> str:
+    """Retrieve database URL, preferring environment variables when running in Docker/staging."""
+    url = config.get_main_option("sqlalchemy.url", "")
+    if not url or url == "sqlite+aiosqlite:///:memory:":
+        if db_url := os.environ.get("DATABASE_URL"):
+            return db_url
+        if postgres_host := os.environ.get("POSTGRES_HOST"):
+            user = os.environ.get("POSTGRES_USER", "quantflow")
+            password = os.environ.get("POSTGRES_PASSWORD", "")
+            port = os.environ.get("POSTGRES_PORT", "5432")
+            db = os.environ.get("POSTGRES_DB", "quantflow")
+            return f"postgresql+asyncpg://{user}:{password}@{postgres_host}:{port}/{db}"
+    return url
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
-    url = config.get_main_option("sqlalchemy.url")
+    url = get_database_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -75,7 +91,8 @@ def run_sync_migrations() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode, auto-detecting async vs sync driver."""
-    url = config.get_main_option("sqlalchemy.url", "")
+    url = get_database_url()
+    config.set_main_option("sqlalchemy.url", url)
     if "+aiosqlite" in url or "+asyncpg" in url or "+async" in url:
         asyncio.run(run_async_migrations())
     else:

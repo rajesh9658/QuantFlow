@@ -89,6 +89,22 @@ class ConfigManager:
 
         # 3. Apply Environment Variable overrides
         env_source = env_dict if env_dict is not None else os.environ
+        # Map standard POSTGRES_* env vars to database section if present
+        db_cfg = self._config.setdefault("database", {})
+        if "POSTGRES_HOST" in env_source and "host" not in db_cfg:
+            db_cfg["host"] = env_source["POSTGRES_HOST"]
+        if "POSTGRES_USER" in env_source and "user" not in db_cfg:
+            db_cfg["user"] = env_source["POSTGRES_USER"]
+        if "POSTGRES_PASSWORD" in env_source and "password" not in db_cfg:
+            db_cfg["password"] = env_source["POSTGRES_PASSWORD"]
+        if "POSTGRES_PORT" in env_source and "port" not in db_cfg:
+            try:
+                db_cfg["port"] = int(env_source["POSTGRES_PORT"])
+            except ValueError:
+                pass
+        if "POSTGRES_DB" in env_source and "name" not in db_cfg:
+            db_cfg["name"] = env_source["POSTGRES_DB"]
+
         for env_key, env_val in env_source.items():
             if env_key.startswith(self._env_prefix):
                 key_path = env_key[len(self._env_prefix) :].lower().split("__")

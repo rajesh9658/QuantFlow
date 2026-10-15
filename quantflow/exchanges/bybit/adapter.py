@@ -137,6 +137,7 @@ class BybitAdapter(ExchangeAdapter):
 
     async def subscribe_market_data(self, symbols: list[str]) -> None:
         self._subscribed_symbols.update(symbols)
+        self._tasks = [t for t in self._tasks if not t.done()]
         for sym in symbols:
             self._tasks.append(asyncio.create_task(self._watch_ticker(sym)))
             self._tasks.append(asyncio.create_task(self._watch_order_book(sym)))
@@ -256,37 +257,39 @@ class BybitAdapter(ExchangeAdapter):
 
         Returns True if reconnected, False if gave up.
         """
-        self._retry_count += 1
-        if self._retry_count > self._max_retries:
+        while self._running:
+            self._retry_count += 1
+            if self._retry_count > self._max_retries:
+                await self._set_state(
+                    ConnectionState.DISCONNECTED,
+                    f"max retries ({self._max_retries}) exceeded",
+                )
+                self._running = False
+                return False
+
             await self._set_state(
-                ConnectionState.DISCONNECTED,
-                f"max retries ({self._max_retries}) exceeded",
+                ConnectionState.RECONNECTING,
+                f"attempt {self._retry_count}/{self._max_retries}",
             )
-            self._running = False
-            return False
 
-        await self._set_state(
-            ConnectionState.RECONNECTING,
-            f"attempt {self._retry_count}/{self._max_retries}",
-        )
+            delay = min(self._base_delay * (2 ** (self._retry_count - 1)), self._max_delay)
+            await asyncio.sleep(delay)
 
-        delay = min(self._base_delay * (2 ** (self._retry_count - 1)), self._max_delay)
-        await asyncio.sleep(delay)
+            if not self._running:
+                return False
 
-        if not self._running:
-            return False
+            try:
+                if self._exchange:
+                    await self._exchange.close()
+                self._exchange = self._make_exchange()
+                await self._exchange.load_markets()
+                self._retry_count = 0
+                await self._set_state(ConnectionState.CONNECTED, "reconnected")
+                return True
+            except Exception:
+                logger.exception("reconnect attempt %d failed", self._retry_count)
 
-        try:
-            if self._exchange:
-                await self._exchange.close()
-            self._exchange = self._make_exchange()
-            await self._exchange.load_markets()
-            self._retry_count = 0
-            await self._set_state(ConnectionState.CONNECTED, "reconnected")
-            return True
-        except Exception:
-            logger.exception("reconnect attempt %d failed", self._retry_count)
-            return await self._handle_reconnect()
+        return False
 
     # ── orders (paper-guarded) ───────────────────────────────────
 
@@ -315,6 +318,7 @@ class BybitAdapter(ExchangeAdapter):
     # ── balances ─────────────────────────────────────────────────
 
     async def get_balances(self) -> dict[str, float]:
+        self._guard_live()
         assert self._exchange is not None
         bal = await self._exchange.fetch_balance()
         return {k: float(v) for k, v in (bal.get("free") or {}).items() if float(v) > 0}

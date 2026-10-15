@@ -1,0 +1,51 @@
+# --- Secrets (CRITICAL) ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# --- Caches / coverage ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.json
+htmlcov/
+.tox/
+
+# --- VCS / IDE ---
+.git/
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+*.swp
+
+# --- Project artifacts ---
+logs/
+*.log
+data/
+notebooks/
+go_live/attestation.json
+*.parquet
+*.csv.gz
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Docker ---
+Dockerfile
+docker-compose*.yml
+.dockerignore

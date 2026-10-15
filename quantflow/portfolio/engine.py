@@ -113,6 +113,7 @@ class PortfolioEngine(PortfolioManager):
             last_updated=self.clock.now(),
         )
         self._last_prices: dict[str, float] = {}
+        self._seen_fill_ids: set[str] = set()
         self._lock = asyncio.Lock()
         self._running = False
 
@@ -219,7 +220,7 @@ class PortfolioEngine(PortfolioManager):
             return
 
         # Case 2: Adding to the same side (q_old and q_fill have the same sign)
-        if (q_old * q_fill > 0) or (q_old * q_new > 0 and abs(q_new) > abs(q_old)):
+        if q_old * q_fill > 0:
             new_avg = (q_old * p_avg + q_fill * p_fill) / q_new
             self.state.positions[symbol] = PositionState(
                 symbol=symbol,
@@ -440,6 +441,12 @@ class PortfolioEngine(PortfolioManager):
 
     def update_position(self, fill: FillEvent) -> None:
         """Synchronously update positions and cash based on an execution fill."""
+        fill_id = getattr(fill, "fill_id", None)
+        if fill_id and fill_id in self._seen_fill_ids:
+            logger.warning("Ignoring duplicate fill_id=%s in update_position", fill_id)
+            return
+        if fill_id:
+            self._seen_fill_ids.add(fill_id)
         self._update_cash(fill)
         self._update_position(fill)
         self._recalculate_valuation_sync()
@@ -447,6 +454,12 @@ class PortfolioEngine(PortfolioManager):
     async def handle_fill(self, event: FillEvent) -> None:
         """Handle incoming FillEvent with atomic state update & event publication."""
         async with self._lock:
+            fill_id = getattr(event, "fill_id", None)
+            if fill_id and fill_id in self._seen_fill_ids:
+                logger.warning("Ignoring duplicate fill_id=%s in handle_fill", fill_id)
+                return
+            if fill_id:
+                self._seen_fill_ids.add(fill_id)
             self._update_cash(event)
             self._update_position(event)
             await self._recalculate_valuation()

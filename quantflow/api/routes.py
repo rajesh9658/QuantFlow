@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from quantflow.api.dependencies import APIState, get_api_state
+from quantflow.api.dependencies import APIState, get_api_state, verify_api_key
 from quantflow.api.schemas import (
     AnalyticsMetricsSnapshot,
     DetailedStrategyMetricsResponse,
@@ -172,6 +172,7 @@ async def get_strategy_metrics(
     "/strategies/{name}/toggle",
     response_model=StrategyToggleResponse,
     summary="Enable/disable strategy",
+    dependencies=[Depends(verify_api_key)],
 )
 async def toggle_strategy(
     name: str,
@@ -216,6 +217,7 @@ async def get_risk_config(
     "/risk/emergency-stop",
     response_model=EmergencyStopResponse,
     summary="Trigger emergency stop",
+    dependencies=[Depends(verify_api_key)],
 )
 async def trigger_emergency_stop(
     body: EmergencyStopRequest,

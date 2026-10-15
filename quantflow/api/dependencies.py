@@ -417,3 +417,25 @@ def set_api_state(state: APIState) -> None:
     """Override APIState singleton (useful for test fixtures)."""
     global _api_state
     _api_state = state
+
+
+from fastapi import Depends, HTTPException, Security, status
+from fastapi.security import APIKeyHeader
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def verify_api_key(
+    state: APIState = Depends(get_api_state),
+    api_key: str | None = Security(api_key_header),
+) -> None:
+    """Verify API key authentication if configured on APIState."""
+    expected_key = state.config.get("api.key")
+    if not expected_key:
+        return
+    if api_key != expected_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+        )
+

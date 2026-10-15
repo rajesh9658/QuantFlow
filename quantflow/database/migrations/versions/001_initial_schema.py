@@ -63,6 +63,7 @@ def upgrade() -> None:
 
     # 2. Partitioned Tables: Tickers, Orderbooks, Logs, Errors
     if is_postgres:
+        log_level_enum.create(bind, checkfirst=True)
         # PostgreSQL Range Partitioning DDL
         op.execute(
             """
@@ -459,6 +460,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    is_postgres = bind.dialect.name == "postgresql"
+
     op.drop_table("partition_metadata")
     op.drop_table("metrics")
     op.drop_table("portfolio")
@@ -471,3 +475,10 @@ def downgrade() -> None:
     op.drop_table("logs")
     op.drop_table("orderbooks")
     op.drop_table("tickers")
+
+    if is_postgres:
+        sa.Enum("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL", name="log_level").drop(bind, checkfirst=True)
+        sa.Enum("buy", "sell", "hold", name="signal_direction").drop(bind, checkfirst=True)
+        sa.Enum("pending", "open", "filled", "partially_filled", "cancelled", "rejected", "expired", name="order_status").drop(bind, checkfirst=True)
+        sa.Enum("market", "limit", "stop_loss", "take_profit", name="order_type").drop(bind, checkfirst=True)
+        sa.Enum("buy", "sell", name="order_side").drop(bind, checkfirst=True)

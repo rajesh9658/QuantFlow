@@ -55,9 +55,24 @@ class DatabaseManager:
     ) -> DatabaseManager:
         """Create DatabaseManager from application configuration."""
         cfg = config if config is not None else ConfigManager()
-        url = str(
-            cfg.get("database.url", "sqlite+aiosqlite:///:memory:")
-        )
+        raw_url = cfg.get("database.url")
+        if raw_url:
+            url = str(raw_url)
+        else:
+            host = cfg.get("database.host")
+            if host:
+                user = cfg.get("database.user", "quantflow")
+                password = cfg.get("database.password") or ""
+                if not password:
+                    try:
+                        password = cfg.get_secret("database.password")
+                    except Exception:
+                        password = ""
+                port = cfg.get("database.port", 5432)
+                name = cfg.get("database.name", "quantflow")
+                url = f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{name}"
+            else:
+                url = "sqlite+aiosqlite:///:memory:"
         echo = bool(cfg.get("database.echo", False))
         pool_size = int(cfg.get("database.pool_size", 10))
         max_overflow = int(cfg.get("database.max_overflow", 20))
