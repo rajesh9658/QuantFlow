@@ -22,10 +22,13 @@ def client() -> TestClient:
 
 
 def test_health_check(client: TestClient) -> None:
-    """Verify health check endpoint returns status ok."""
+    """Verify health check endpoint returns status ok and metadata."""
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert "version" in data
+    assert "started_at" in data
 
 
 def test_get_portfolio_shape(client: TestClient) -> None:

@@ -289,11 +289,6 @@ class PostgresEventStoreReader(EventStoreReader):
         ):
             yield ev
 
-    async def read_all(
-        self,
-        event_types: list[str] | None = None,
-        symbols: list[str] | None = None,
-    ) -> AsyncIterator[Event]:
         # Cover wide range
         start = datetime(1970, 1, 1, tzinfo=UTC)
         end = datetime(2099, 1, 1, tzinfo=UTC)
@@ -301,3 +296,63 @@ class PostgresEventStoreReader(EventStoreReader):
             start, end, event_types=event_types, symbols=symbols
         ):
             yield ev
+
+
+class SyntheticEventStore(EventStoreReader):
+    """Generates deterministic synthetic ticker, orderbook, and trade streams for paper/demo mode."""
+
+    def __init__(
+        self,
+        symbols: list[str] | None = None,
+        base_prices: dict[str, float] | None = None,
+    ) -> None:
+        self.symbols = symbols or ["BTC/USDT", "ETH/USDT"]
+        self.base_prices = base_prices or {"BTC/USDT": 50000.0, "ETH/USDT": 3000.0}
+
+    def generate_tick(self, symbol: str, step: int = 0) -> TickEvent:
+        """Generate a single deterministic tick."""
+        base = self.base_prices.get(symbol, 100.0)
+        delta = (step % 20 - 10) * (base * 0.0005)
+        p = base + delta
+        now = datetime.now(UTC)
+        return TickEvent(
+            symbol=symbol,
+            exchange="paper",
+            exchange_id="paper",
+            source="synthetic",
+            bid_price=round(p - 0.5, 2),
+            ask_price=round(p + 0.5, 2),
+            bid_size=1.5,
+            ask_size=1.5,
+            last_price=round(p, 2),
+            last_size=0.5,
+            timestamp=now,
+            timestamp_received=now,
+        )
+
+    async def read_range(
+        self,
+        start: datetime,
+        end: datetime,
+        event_types: list[str] | None = None,
+        symbols: list[str] | None = None,
+    ) -> AsyncIterator[Event]:
+        active_symbols = symbols or self.symbols
+        step = 0
+        for sym in active_symbols:
+            yield self.generate_tick(sym, step)
+            step += 1
+
+    async def read_all(
+        self,
+        event_types: list[str] | None = None,
+        symbols: list[str] | None = None,
+    ) -> AsyncIterator[Event]:
+        async for ev in self.read_range(
+            datetime(1970, 1, 1, tzinfo=UTC),
+            datetime(2099, 1, 1, tzinfo=UTC),
+            event_types=event_types,
+            symbols=symbols,
+        ):
+            yield ev
+

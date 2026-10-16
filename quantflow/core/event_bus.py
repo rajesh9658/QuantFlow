@@ -105,3 +105,52 @@ class AsyncEventBus(EventBus):
 # Alias for spec parity
 InMemoryEventBus = AsyncEventBus
 
+
+class RedisStreamEventBus(AsyncEventBus):
+    """EventBus that dispatches in-process and mirrors to Redis Stream when available."""
+
+    def __init__(
+        self,
+        redis_url: str = "redis://localhost:6379/0",
+        stream_key: str = "quantflow:events",
+        default_queue_maxsize: int = 1000,
+        clock: Clock | None = None,
+    ) -> None:
+        super().__init__(default_queue_maxsize=default_queue_maxsize, clock=clock)
+        self.redis_url = redis_url
+        self.stream_key = stream_key
+        self._redis_client: Any = None
+
+    async def connect(self) -> None:
+        """Attempt connection to Redis instance."""
+        try:
+            import redis.asyncio as aioredis
+
+            self._redis_client = aioredis.from_url(self.redis_url)
+            await self._redis_client.ping()
+        except Exception:
+            self._redis_client = None
+
+    async def close(self) -> None:
+        """Close connection to Redis."""
+        if self._redis_client is not None:
+            try:
+                await self._redis_client.close()
+            except Exception:
+                pass
+            self._redis_client = None
+
+    async def publish(self, event: Event) -> None:
+        """Publish locally and to Redis stream if connected."""
+        await super().publish(event)
+        if self._redis_client is not None:
+            try:
+                data = {
+                    "event_type": type(event).__name__,
+                    "payload": event.model_dump_json(),
+                }
+                await self._redis_client.xadd(self.stream_key, data)
+            except Exception:
+                pass
+
+

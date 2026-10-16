@@ -58,6 +58,8 @@ class DashboardWebSocketManager:
         self.active_connections: dict[str, DashboardConnection] = {}
         self._lock = asyncio.Lock()
         self._event_bus_subscribed = False
+        self._last_ticker_broadcast: dict[str, float] = {}
+        self._ticker_throttle_ms: float = 250.0
 
     async def connect(
         self, websocket: WebSocket, token: str | None = None
@@ -211,8 +213,15 @@ class DashboardWebSocketManager:
             await self.broadcast("exchange_status", data)
 
     async def handle_tick_event(self, event: TickEvent) -> None:
-        """Bridge TickEvent to clients subscribed to that symbol."""
+        """Bridge TickEvent to clients subscribed to that symbol, throttled to 250ms."""
+        import time
+
         symbol = getattr(event, "symbol", "")
+        now_ms = time.monotonic() * 1000.0
+        if (now_ms - self._last_ticker_broadcast.get(symbol, 0.0)) < self._ticker_throttle_ms:
+            return
+        self._last_ticker_broadcast[symbol] = now_ms
+
         data = {
             "symbol": symbol,
             "bid": float(getattr(event, "bid_price", 0.0)),

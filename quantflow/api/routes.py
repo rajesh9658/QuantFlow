@@ -4,29 +4,41 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from quantflow.api.dependencies import APIState, get_api_state, verify_api_key
 from quantflow.api.schemas import (
     AnalyticsMetricsSnapshot,
+    BacktestJobStatusResponse,
+    BacktestRunDetailResponse,
+    BacktestRunItem,
+    BacktestRunRequest,
+    BacktestRunResponse,
     DetailedStrategyMetricsResponse,
     EmergencyStopRequest,
     EmergencyStopResponse,
     EquityCurvePoint,
+    ExchangeItem,
     ExchangeStatusItem,
+    ExchangeToggleRequest,
+    ExchangeToggleResponse,
     LogEntryItem,
     OrderItem,
     PortfolioSnapshotResponse,
     RiskConfigResponse,
+    RiskConfigUpdateRequest,
     RiskStatusResponse,
     SignalItem,
+    StrategyConfigResponse,
+    StrategyConfigUpdateRequest,
     StrategySummaryItem,
     StrategyToggleRequest,
     StrategyToggleResponse,
     TradeExecutionItem,
+    UserMeResponse,
 )
 
-router = APIRouter(prefix="/api", tags=["QuantFlow API"])
+router = APIRouter(tags=["QuantFlow API"])
 
 
 # ── Portfolio Endpoints ────────────────────────────────────────────
@@ -281,3 +293,184 @@ async def get_metrics(
     """Retrieve overall system analytics snapshot (Sharpe, Sortino, Win Rate, etc.)."""
     metrics = state.get_analytics_metrics()
     return AnalyticsMetricsSnapshot(**metrics)
+
+
+@router.get(
+    "/metrics/summary",
+    response_model=AnalyticsMetricsSnapshot,
+    summary="Aggregated analytics summary",
+)
+async def get_metrics_summary(
+    state: Annotated[APIState, Depends(get_api_state)],
+) -> AnalyticsMetricsSnapshot:
+    """Retrieve overall system analytics snapshot."""
+    metrics = state.get_analytics_metrics()
+    return AnalyticsMetricsSnapshot(**metrics)
+
+
+@router.get(
+    "/strategies/{name}/config",
+    response_model=StrategyConfigResponse,
+    summary="Get strategy configuration",
+)
+async def get_strategy_config(
+    name: str,
+    state: Annotated[APIState, Depends(get_api_state)],
+) -> StrategyConfigResponse:
+    """Retrieve current strategy parameters."""
+    cfg = state.get_strategy_config(name)
+    return StrategyConfigResponse(name=name, config=cfg)
+
+
+@router.patch(
+    "/strategies/{name}/config",
+    response_model=StrategyConfigResponse,
+    summary="Update strategy configuration",
+    dependencies=[Depends(verify_api_key)],
+)
+async def update_strategy_config(
+    name: str,
+    body: StrategyConfigUpdateRequest,
+    state: Annotated[APIState, Depends(get_api_state)],
+) -> StrategyConfigResponse:
+    """Hot-reload strategy parameter configuration."""
+    cfg = state.update_strategy_config(name, body.config)
+    return StrategyConfigResponse(name=name, config=cfg)
+
+
+@router.patch(
+    "/risk/config",
+    response_model=RiskConfigResponse,
+    summary="Update risk configuration",
+    dependencies=[Depends(verify_api_key)],
+)
+async def update_risk_config(
+    body: RiskConfigUpdateRequest,
+    state: Annotated[APIState, Depends(get_api_state)],
+) -> RiskConfigResponse:
+    """Update risk limits and thresholds."""
+    updates = body.model_dump(exclude_unset=True)
+    cfg = state.update_risk_config(updates)
+    return RiskConfigResponse(**cfg)
+
+
+@router.get(
+    "/exchanges",
+    response_model=list[ExchangeItem],
+    summary="List all exchange adapters",
+)
+async def get_exchanges(
+    state: Annotated[APIState, Depends(get_api_state)],
+) -> list[ExchangeItem]:
+    """Retrieve detailed state and configuration for all exchange adapters."""
+    items = state.get_exchanges()
+    return [ExchangeItem(**item) for item in items]
+
+
+@router.get(
+    "/exchanges/{id}/status",
+    response_model=ExchangeItem,
+    summary="Get single exchange adapter status",
+)
+async def get_exchange_status_by_id(
+    id: str,
+    state: Annotated[APIState, Depends(get_api_state)],
+) -> ExchangeItem:
+    """Retrieve status for a specific exchange adapter."""
+    item = state.get_exchange_status_by_id(id)
+    if not item:
+        raise HTTPException(
+            status_code=404, detail=f"Exchange '{id}' not found"
+        )
+    return ExchangeItem(**item)
+
+
+@router.post(
+    "/exchanges/{id}/toggle",
+    response_model=ExchangeToggleResponse,
+    summary="Enable or disable an exchange adapter",
+    dependencies=[Depends(verify_api_key)],
+)
+async def toggle_exchange(
+    id: str,
+    body: ExchangeToggleRequest,
+    state: Annotated[APIState, Depends(get_api_state)],
+) -> ExchangeToggleResponse:
+    """Toggle connection and order routing for a specific exchange adapter."""
+    res = state.toggle_exchange(id, body.enabled)
+    return ExchangeToggleResponse(id=id, enabled=res["enabled"])
+
+
+@router.get(
+    "/backtest/runs",
+    response_model=list[BacktestRunItem],
+    summary="List historical backtest runs",
+)
+async def get_backtest_runs(
+    state: Annotated[APIState, Depends(get_api_state)],
+) -> list[BacktestRunItem]:
+    """Retrieve list of historical backtest runs with performance summaries."""
+    runs = state.get_backtest_runs()
+    return [BacktestRunItem(**r) for r in runs]
+
+
+@router.get(
+    "/backtest/runs/{id}",
+    response_model=BacktestRunDetailResponse,
+    summary="Get detailed backtest run report",
+)
+async def get_backtest_run_detail(
+    id: str,
+    state: Annotated[APIState, Depends(get_api_state)],
+) -> BacktestRunDetailResponse:
+    """Retrieve in-depth backtest report including equity curve and trade logs."""
+    run = state.get_backtest_run(id)
+    if not run:
+        raise HTTPException(
+            status_code=404, detail=f"Backtest run '{id}' not found"
+        )
+    return BacktestRunDetailResponse(**run)
+
+
+@router.post(
+    "/backtest/run",
+    response_model=BacktestRunResponse,
+    summary="Trigger a backtest execution",
+    dependencies=[Depends(verify_api_key)],
+)
+async def trigger_backtest_run(
+    body: BacktestRunRequest,
+    state: Annotated[APIState, Depends(get_api_state)],
+) -> BacktestRunResponse:
+    """Trigger an asynchronous backtest simulation job."""
+    job_id = state.submit_backtest_job(body.model_dump())
+    return BacktestRunResponse(job_id=job_id, status="queued")
+
+
+@router.get(
+    "/backtest/jobs/{job_id}",
+    response_model=BacktestJobStatusResponse,
+    summary="Get backtest job status",
+)
+async def get_backtest_job_status(
+    job_id: str,
+    state: Annotated[APIState, Depends(get_api_state)],
+) -> BacktestJobStatusResponse:
+    """Inquire about the execution status of an asynchronous backtest job."""
+    job = state.get_backtest_job(job_id)
+    if not job:
+        raise HTTPException(
+            status_code=404, detail=f"Backtest job '{job_id}' not found"
+        )
+    return BacktestJobStatusResponse(**job)
+
+
+@router.get(
+    "/auth/me",
+    response_model=UserMeResponse,
+    summary="Get current authenticated user",
+)
+async def get_current_user() -> UserMeResponse:
+    """Retrieve current session identity."""
+    return UserMeResponse(user_id="dev-trader-1", role="admin")
+

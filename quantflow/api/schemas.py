@@ -222,3 +222,125 @@ class WSClientAction(BaseModel):
 
     action: str
     symbols: list[str] = Field(default_factory=list)
+
+
+# ── Configuration & Management Schemas ───────────────────────────
+
+
+class StrategyConfigResponse(BaseModel):
+    """Current configuration for a strategy."""
+
+    name: str
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class StrategyConfigUpdateRequest(BaseModel):
+    """Hot-reloadable strategy configuration updates."""
+
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class RiskConfigUpdateRequest(BaseModel):
+    """Hot-reloadable risk threshold updates."""
+
+    max_position_qty: float | None = None
+    max_daily_loss: float | None = None
+    max_total_exposure: float | None = None
+    allowed_symbols: list[str] | None = None
+    trading_schedule: str | None = None
+
+
+class ExchangeItem(BaseModel):
+    """Detailed exchange state representation."""
+
+    id: str
+    name: str
+    type: str = "crypto"
+    enabled: bool = True
+    connected: bool = True
+    latency_ms: float = 45.0
+    last_heartbeat: str | None = None
+    symbols_subscribed: list[str] = Field(default_factory=list)
+
+
+class ExchangeToggleRequest(BaseModel):
+    """Request payload to toggle an exchange adapter."""
+
+    enabled: bool
+
+
+class ExchangeToggleResponse(BaseModel):
+    """Response payload following exchange toggle."""
+
+    id: str
+    enabled: bool
+
+
+# ── Backtesting Schemas ──────────────────────────────────────────
+
+
+class BacktestRunItem(BaseModel):
+    """Summary of a historical backtest run."""
+
+    id: str
+    strategy_name: str
+    start_date: str
+    end_date: str
+    status: str = "completed"
+    created_at: str
+    sharpe: float = 0.0
+    win_rate: float = 0.0
+    total_return: float = 0.0
+    max_drawdown: float = 0.0
+
+
+class BacktestRunDetailResponse(BaseModel):
+    """Detailed backtest execution report."""
+
+    id: str
+    strategy_name: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    start_date: str
+    end_date: str
+    status: str = "completed"
+    created_at: str
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    equity_curve: list[EquityCurvePoint] = Field(default_factory=list)
+    trades: list[TradeExecutionItem] = Field(default_factory=list)
+
+
+class BacktestRunRequest(BaseModel):
+    """Request parameters to trigger an asynchronous backtest run."""
+
+    strategy_name: str
+    symbol: str = "BTC/USDT"
+    start_date: str = "2024-01-01"
+    end_date: str = "2024-06-01"
+    initial_cash: float = 100000.0
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+class BacktestRunResponse(BaseModel):
+    """Asynchronous backtest job submission response."""
+
+    job_id: str
+    status: str = "queued"
+
+
+class BacktestJobStatusResponse(BaseModel):
+    """Status inquiry response for a backtest background job."""
+
+    job_id: str
+    status: str  # "queued" | "running" | "completed" | "failed"
+    progress: float = 0.0
+    run_id: str | None = None
+    error: str | None = None
+
+
+class UserMeResponse(BaseModel):
+    """Authenticated user profile representation."""
+
+    user_id: str
+    role: str
+    email: str = "trader@quantflow.io"
+

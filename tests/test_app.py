@@ -27,3 +27,23 @@ async def test_app_healthz_callable() -> None:
     assert isinstance(status, dict)
     assert status["status"] in ("healthy", "degraded")
     assert "system" in status["checks"]
+
+
+def test_fastapi_main_composition_lifespan() -> None:
+    """Verify main composition root lifespan and endpoint exposition."""
+    from fastapi.testclient import TestClient
+
+    from quantflow.main import app as main_app
+
+    with TestClient(main_app) as client:
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+        metrics_resp = client.get("/metrics")
+        assert metrics_resp.status_code == 200
+        assert "quantflow_portfolio_equity" in metrics_resp.text
+
+        v1_resp = client.get("/api/v1/portfolio")
+        assert v1_resp.status_code == 200
+

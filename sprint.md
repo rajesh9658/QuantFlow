@@ -1,483 +1,385 @@
-QuantFlow Local Multi-Exchange Docker Setup
-This setup runs QuantFlow, PostgreSQL, and Redis locally with proper healthcheck-based startup ordering, secrets from a gitignored .env, automatic Alembic migrations before serving traffic, and a dedicated way to run the test suite against real Postgres/Redis using the same image.
+You are the lead full-stack engineer for QuantFlow, a modular async quantitative trading platform. The backend specification is complete (Sprints 0–15). Your task has two phases: (A) boot the backend in a running state and (B) build the production-grade frontend that talks to it. Ship both to a live production environment.
 
-File Tree
+Work autonomously. Do not ask for clarification on details already specified in this prompt or the spec files. When a decision is ambiguous, pick the option that maximizes determinism, testability, and observability, and document it in DECISIONS.md.
+
+Phase A — Backend: bring it to a running state
+A1. Repository layout (enforce this)
 text
 quantflow/
-├── docker-compose.yml
-├── Dockerfile
-├── .dockerignore
-├── .env.example                 # committed template
-├── .env                         # gitignored, real secrets
-├── .gitignore                   # must contain .env
+├── pyproject.toml # PEP 621, hatchling backend
 ├── alembic.ini
-├── requirements.txt
-├── requirements-dev.txt
-├── docker/
-│   ├── entrypoint.sh
-│   └── postgres-init/
-│       └── 01-create-test-db.sql
+├── alembic/versions/
+├── config/
+│ ├── quantflow.yaml # multi-exchange shape (Sprint 14)
+│ └── quantflow.example.yaml
 ├── quantflow/
-│   └── ...
-└── tests/
-    └── ...
-1. docker-compose.yml
-yaml
-name: quantflow
+│ ├── **init**.py
+│ ├── main.py # FastAPI app factory
+│ ├── core/ # interfaces.py, exchange_registry.py, symbol_mapper.py
+│ ├── clock/ # clock.py (SystemClock, SimulatedClock)
+│ ├── events/ # events.py (pydantic v2 models)
+│ ├── config/ # config_manager.py, secrets.py
+│ ├── logging/ # logging_setup.py (structlog)
+│ ├── di/ # di_container.py
+│ ├── bus/ # event_bus.py (in-memory + redis implementations)
+│ ├── adapters/ # binance.py, bybit.py
+│ ├── market_data/ # engine.py, local_order_book.py
+│ ├── strategy/ # engine.py, plugin_loader.py
+│ ├── risk/ # engine.py
+│ ├── execution/ # paper_handler.py, order_simulator.py, fees.py
+│ ├── portfolio/ # engine.py
+│ ├── analytics/ # engine.py, aggregators.py
+│ ├── replay/ # engine.py, event_store.py
+│ ├── backtest/ # engine.py, sweep.py, walk_forward.py, significance.py
+│ ├── go_live/ # checks.py, gate.py, guard.py, attest.py
+│ ├── api/ # FastAPI routers — see A3
+│ └── scheduler/ # async_io_scheduler.py
+├── tests/
+│ ├── unit/
+│ ├── integration/
+│ └── e2e/
+├── docker/
+│ ├── entrypoint.sh
+│ └── postgres-init/01-create-test-db.sql
+├── Dockerfile
+├── docker-compose.yml
+├── .dockerignore
+├── .env.example
+└── README.md
+A2. Bring the backend to a running state
+Create every module described in Sprints 0–15 with the exact signatures given there. No placeholders, no ..., no pass # TODO. Every method must be implemented or raise NotImplementedError with a clear message if truly out of scope (and there should be almost none).
 
-services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      POSTGRES_DB: ${POSTGRES_DB:-quantflow}
-      # Ensures passwords hashed with scram-sha-256
-      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -h 127.0.0.1
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
+Implement the composition root at quantflow/main.py:
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command:
-      - redis-server
-      - --appendonly
-      - "yes"
-      - --save
-      - "60 1"
-    volumes:
-      - redis_data:/data
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 5s
+create_app() returns a FastAPI instance.
 
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: runtime
-    image: quantflow:local
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      # Compose-internal service names override the .env defaults
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      APP_ENV: ${APP_ENV:-development}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      LOG_FORMAT: ${LOG_FORMAT:-console}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    ports:
-      - "${APP_PORT:-8000}:8000"
-    # Source mount enables uvicorn --reload during local dev.
-    # Read-only so the container can never write into the repo.
-    volumes:
-      - ./quantflow:/app/quantflow:ro
-      - ./alembic:/app/alembic:ro
-      - ./alembic.ini:/app/alembic.ini:ro
-      - ./config:/app/config:ro
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    command:
-      - uvicorn
-      - quantflow.main:app
-      - --host
-      - "0.0.0.0"
-      - --port
-      - "8000"
-      - --reload
+On startup (lifespan): resolve config → configure logging → construct DI container → build ExchangeRegistry → build MarketDataEngine → build strategies via PluginLoader → build RiskEngine, PaperExecutionHandler/LiveExecutionHandler, PortfolioEngine, AnalyticsEngine, Scheduler → subscribe everything → start the EventBus.
 
-  # -----------------------------------------------------------------
-  # Test runner — same image, separate database, activated via profile.
-  #   docker compose --profile test run --rm test
-  #   docker compose --profile test run --rm test pytest tests/unit
-  # -----------------------------------------------------------------
-  test:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: runtime
-    image: quantflow:local
-    profiles: ["test"]
-    env_file:
-      - .env
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB: quantflow_test
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_DB: "1"
-      APP_ENV: test
-      LOG_LEVEL: WARNING
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    # Source mount keeps test code in sync with the working tree.
-    # pytest cache is redirected to tmpfs because the mount is read-only.
-    volumes:
-      - ./quantflow:/app/quantflow:ro
-      - ./tests:/app/tests:ro
-      - ./alembic:/app/alembic:ro
-      - ./alembic.ini:/app/alembic.ini:ro
-    tmpfs:
-      - /app/.pytest_cache
-      - /tmp
-    command: ["pytest", "-xvs", "-p", "no:cacheprovider", "tests/"]
+On shutdown: reverse order, with cancellation on timeout.
 
-volumes:
-  postgres_data:
-  redis_data:
-Startup ordering — why this works
-depends_on alone only waits for the container to start, not to be ready.
+The app must refuse to start in live mode without a valid attestation (Sprint 15).
 
-condition: service_healthy forces Compose to wait for the target's healthcheck to report healthy before starting the dependent service.
+Provide both InMemoryEventBus and RedisStreamEventBus behind the same ABC. Selection is driven by QUANTFLOW_EVENT_BUS_TYPE.
 
-postgres uses pg_isready, which checks the server accepts connections and the target database exists.
+Make the whole stack start with zero live credentials in paper mode: use a SyntheticEventStore that generates deterministic fake ticker/orderbook/trade streams so the app runs end-to-end without touching an exchange.
 
-redis uses redis-cli ping, which confirms the server is accepting commands.
+Run every test suite in tests/. All tests must pass. Achieve the coverage gates from Sprint 15 (85% line, 75% branch, 95% on critical modules). If a test is missing for a code path you added, write it.
 
-start_period gives the service time to initialize without marking failed healthchecks during warm-up.
-
-No sleep-based waits are used anywhere.
-
-2. Dockerfile
-dockerfile
-# syntax=docker/dockerfile:1.7
-
-# ---------- Builder ----------
-FROM python:3.12-slim AS builder
-
-ENV PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-WORKDIR /build
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy lockfiles first for layer caching
-COPY requirements.txt requirements-dev.txt ./
-
-RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --upgrade pip setuptools wheel \
-    && /opt/venv/bin/pip install -r requirements.txt -r requirements-dev.txt
-
-# ---------- Runtime ----------
-FROM python:3.12-slim AS runtime
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PATH="/opt/venv/bin:$PATH"
-
-# curl for healthcheck; tini for proper PID 1 signal handling
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl tini \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd -r quantflow \
-    && useradd -r -g quantflow -d /app -s /usr/sbin/nologin quantflow
-
-WORKDIR /app
-
-COPY --from=builder /opt/venv /opt/venv
-
-# Copy project (no .env — excluded by .dockerignore)
-COPY --chown=quantflow:quantflow . .
-
-RUN chmod +x /app/docker/entrypoint.sh
-
-USER quantflow
-
-EXPOSE 8000
-
-ENTRYPOINT ["/usr/bin/tini", "--", "/app/docker/entrypoint.sh"]
-CMD ["uvicorn", "quantflow.main:app", "--host", "0.0.0.0", "--port", "8000"]
-Notes:
-
-Non-root user quantflow for runtime safety.
-
-tini reaps zombies and forwards SIGTERM to uvicorn.
-
-.env never enters the image — see .dockerignore.
-
-3. docker/entrypoint.sh
-bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-log() { printf '[entrypoint] %s\n' "$*"; }
-
-# ---------- Validate required env ----------
-: "${POSTGRES_HOST:?POSTGRES_HOST is required}"
-: "${POSTGRES_USER:?POSTGRES_USER is required}"
-: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
-: "${POSTGRES_DB:?POSTGRES_DB is required}"
-
-# ---------- Run migrations ----------
-# Idempotent. Runs against POSTGRES_DB (dev DB for `app`, test DB for `test`).
-log "Running alembic migrations against ${POSTGRES_HOST}/${POSTGRES_DB}..."
-if ! alembic -c /app/alembic.ini upgrade head; then
-    log "ERROR: alembic upgrade failed"
-    exit 1
-fi
-log "Migrations complete."
-
-# ---------- Hand off to CMD ----------
-log "Executing: $*"
-exec "$@"
-Behavior:
-
-Runs on every container start. Alembic upgrade head is idempotent, so this is safe for restarts and for the test service.
-
-Fails fast if migrations fail — the app never serves traffic against an out-of-date schema.
-
-Handles docker compose run --rm app bash gracefully (migrations run, then the shell opens).
-
-For the test service, POSTGRES_DB=quantflow_test ensures migrations target the test database, not the dev one.
-
-4. docker/postgres-init/01-create-test-db.sql
-Postgres runs any *.sql files in /docker-entrypoint-initdb.d only on first initialization (empty data volume). This creates the test database alongside the main one:
-
-sql
--- Runs as the superuser (POSTGRES_USER) once, on first init.
-CREATE DATABASE quantflow_test OWNER :"POSTGRES_USER";
-If you change POSTGRES_USER, this script adapts. To recreate from scratch:
+Verify the stack runs with:
 
 bash
-docker compose down -v
-docker compose up -d postgres
-5. .dockerignore
+docker compose up -d postgres redis
+docker compose run --rm app alembic upgrade head
+docker compose up app
+curl -fsS http://localhost:8000/health
+curl -fsS http://localhost:8000/metrics | head
+All three must succeed before moving to Phase B.
+
+A3. Required FastAPI surface
+Implement these routers under /api/v1 (contracts from the frontend spec):
+
+REST endpoints
+
+Method Path Returns
+GET /health {"status": "ok", "version": "...", "started_at": "..."}
+GET /metrics Prometheus exposition format
+GET /api/v1/portfolio current portfolio snapshot
+GET /api/v1/portfolio/history?from=&to=&interval= equity curve time series
+GET /api/v1/trades?from=&to=&strategy=&symbol=&exchange_id=&limit=&offset= paginated fills
+GET /api/v1/orders?status=&strategy=&exchange_id=&limit=&offset= paginated orders
+GET /api/v1/signals?from=&to=&strategy=&exchange_id=&limit=&offset= paginated signals
+GET /api/v1/strategies list of loaded plugins with per-strategy metrics
+GET /api/v1/strategies/{name}/metrics detailed strategy performance
+GET /api/v1/strategies/{name}/config current strategy config
+PATCH /api/v1/strategies/{name}/config update config (hot-reloadable values only)
+POST /api/v1/strategies/{name}/toggle enable/disable
+GET /api/v1/risk/status current risk state
+GET /api/v1/risk/config risk thresholds
+PATCH /api/v1/risk/config update thresholds (hot-reload)
+POST /api/v1/risk/emergency-stop {enabled, trigger} → activates/deactivates
+GET /api/v1/exchanges list of exchanges with status
+GET /api/v1/exchanges/{id}/status single exchange status
+POST /api/v1/exchanges/{id}/toggle enable/disable
+GET /api/v1/logs?level=&from=&to=&correlation_id=&limit=&offset= paginated logs
+GET /api/v1/metrics/summary aggregated analytics snapshot
+GET /api/v1/backtest/runs list of historical backtest runs
+GET /api/v1/backtest/runs/{id} one backtest report
+POST /api/v1/backtest/run trigger a backtest (async job, returns job_id)
+GET /api/v1/backtest/jobs/{job_id} job status
+WebSocket
+
+Single endpoint: GET /ws/dashboard (upgrade to WebSocket).
+
+Authenticate via Authorization: Bearer <jwt> header or ?token= query param.
+
+Send the message envelope shapes specified in the frontend spec (see Phase B, "WebSocket contract").
+
+Client actions: subscribe, unsubscribe, ping.
+
+Server events: connected, portfolio_update, fill, signal, risk_status, exchange_status, log, ticker, pong, error.
+
+Throttle ticker events to one per symbol per 250ms.
+
+Middleware / cross-cutting
+
+CORSMiddleware with origins from QUANTFLOW_CORS_ORIGINS (comma-separated). No \* in production.
+
+Request ID middleware: generate X-Request-ID, bind to structlog context, echo in response.
+
+Correlation ID middleware: propagate into the EventBus context so every WS event carries it.
+
+Auth middleware: JWT verification on all /api/v1/_ and /ws/_. In APP_ENV=development, allow a dev bypass with a fixed user.
+
+Rate limiting: slowapi or equivalent, keyed by user, on all mutating endpoints (POST/PATCH/DELETE).
+
+Structured error handling: all exceptions return {"error": {"code": "...", "message": "...", "request_id": "..."}}.
+
+Phase B — Frontend: production-ready dashboard
+B1. Stack (do not deviate)
+Layer Choice
+Framework React 18 + TypeScript (strict mode on)
+Build Vite 5
+Routing React Router v6
+UI primitives shadcn/ui (installed via CLI, components committed to repo)
+Styling Tailwind CSS 3
+Server state TanStack Query v5
+Real-time state Zustand
+Financial charts TradingView Lightweight Charts
+Analytics charts Recharts
+Forms React Hook Form + Zod
+HTTP fetch wrapped in a typed client (no axios)
+Testing Vitest + React Testing Library + MSW for REST, mock-socket for WS
+Linting ESLint + eslint-plugin-react-hooks, Prettier
+B2. Absolute rule: zero hardcoded values
+A CI check (scripts/check-no-hardcoded.sh) must fail the build if any of the following patterns appear in src/ outside of src/config/ and src/test/:
+
+Any literal http://, https://, ws://, wss:// URL.
+
+Any literal localhost, 127.0.0.1, or IP address.
+
+Any literal API route string (e.g., /api/v1/) outside src/config/endpoints.ts.
+
+Any numeric trading constant (0.001, 0.5, 10000, etc.) that is not decorated with an inline comment // non-configurable: <reason>.
+
+Any process.env.X access outside src/config/env.ts.
+
+All configuration flows through one module:
+
+typescript
+// src/config/env.ts
+import { z } from "zod";
+
+const EnvSchema = z.object({
+VITE_API_BASE_URL: z.string().url(),
+VITE_WS_URL: z.string().url(),
+VITE_APP_ENV: z.enum(["development", "staging", "production"]),
+VITE_AUTH_MODE: z.enum(["jwt", "dev-bypass"]).default("jwt"),
+VITE_TICKER_THROTTLE_MS: z.coerce.number().int().positive().default(250),
+VITE_RECONNECT_BASE_MS: z.coerce.number().int().positive().default(1000),
+VITE_RECONNECT_MAX_MS: z.coerce.number().int().positive().default(30000),
+VITE_WS_PING_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
+VITE_QUERY_STALE_MS: z.coerce.number().int().positive().default(5000),
+});
+
+export const env = EnvSchema.parse(import.meta.env);
+Endpoints live in src/config/endpoints.ts as a frozen object of template functions. No fetch call may inline a path.
+
+B3. State management — strict separation
+Rule 1: Server data never lives in Zustand. Use TanStack Query for anything fetched via REST (portfolio snapshot, trades, orders, signals, strategies, risk config, exchange status, logs, backtest runs).
+
+Rule 2: Real-time data never lives in TanStack Query. Use Zustand stores for WebSocket-pushed state.
+
+Rule 3: One WebSocket connection per tab. A single WebSocketProvider (React context) owns the connection. Zustand stores receive updates via subscription from the provider — stores never open sockets themselves.
+
+Store layout:
+
 text
-# --- Secrets (CRITICAL) ---
-.env
-.env.*
-!.env.example
+src/state/
+├── ws/
+│ ├── WebSocketProvider.tsx # connection lifecycle, reconnect, ping/pong
+│ ├── useWebSocket.ts # hook to send actions, read status
+│ └── wsRouter.ts # dispatches inbound messages to stores
+├── portfolioStore.ts # { snapshot, history, lastUpdate }
+├── riskStore.ts # { status, config, emergencyStop }
+├── exchangeStore.ts # { exchanges: Record<id, status> }
+├── logStore.ts # bounded ring buffer (max 1000)
+├── tickerStore.ts # { bySymbol: Record<canonical, Ticker> }
+└── uiStore.ts # { theme, sidebarOpen, activeFilters }
+Every store:
 
-# --- Python ---
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
-build/
-dist/
-.venv/
-venv/
-env/
+Is created with create<State>()(...) and typed.
 
-# --- Caches / coverage ---
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-.coverage.*
-coverage.json
-htmlcov/
-.tox/
+Exposes selectors (usePortfolioStore(s => s.snapshot)), not the whole store.
 
-# --- VCS / IDE ---
-.git/
-.gitignore
-.gitattributes
-.idea/
-.vscode/
-*.swp
+Uses subscribeWithSelector middleware.
 
-# --- Project artifacts ---
-logs/
-*.log
-data/
-notebooks/
-go_live/attestation.json
-*.parquet
-*.csv.gz
+Never holds React refs, DOM nodes, or functions.
 
-# --- OS ---
-.DS_Store
-Thumbs.db
+Rule 4: Query invalidation on WS events. When the WS router receives fill or portfolio_update, it calls queryClient.invalidateQueries({ queryKey: ["trades"] }) and ["portfolio"] — but does not write into the query cache directly. The live numbers come from Zustand; the historical tables refresh via Query.
 
-# --- Docker ---
-Dockerfile
-docker-compose*.yml
-.dockerignore
-Critical: .env is excluded, so COPY . . in the Dockerfile cannot leak secrets into image layers. Only .env.example is allowed through as a reference.
+Rule 5: No useEffect for data fetching. All REST reads are useQuery; all REST writes are useMutation. Only the WS provider and layout effects use useEffect.
 
-6. .env.example
-bash
-# =====================================================================
-# QuantFlow local environment
-# Copy to .env and fill in real values:
-#     cp .env.example .env
-# .env is gitignored and MUST NOT be committed.
-# =====================================================================
+B4. WebSocket contract (frontend expects exactly this)
+Envelope: { event: string; timestamp: string; data: T }.
 
-# ---------- Application ----------
-APP_ENV=development              # development | test | paper | live
-APP_PORT=8000
-LOG_LEVEL=INFO                   # DEBUG | INFO | WARNING | ERROR
-LOG_FORMAT=console               # console (dev) | json (prod)
+Events: connected, portfolio_update, fill, signal, risk_status, exchange_status, log, ticker, pong, error — with the exact payload shapes defined in the backend spec.
 
-# ---------- PostgreSQL ----------
-# POSTGRES_HOST and POSTGRES_PORT are overridden by docker-compose
-# for in-container networking (postgres:5432). These values are used
-# only when running the app outside Docker.
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_USER=quantflow
-POSTGRES_PASSWORD=change_me_use_a_long_random_string
-POSTGRES_DB=quantflow
+The wsRouter.ts is a typed switch over event. It is the only file that knows about WS message shapes. Everything else consumes the stores.
 
-# ---------- Redis ----------
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
-REDIS_PASSWORD=                  # leave blank for local dev
+B5. Pages
+Build these routes under src/pages/:
 
-# ---------- Exchange credentials ----------
-# Referenced from quantflow.yaml as:
-#     credentials_ref: "env:BINANCE_API_KEY"
-# Never commit real keys.
-BINANCE_API_KEY=replace_with_real_key
-BINANCE_API_SECRET=replace_with_real_secret
+/ → Overview: equity curve (Recharts), current PnL, exposure, drawdown, win rate, top positions, exchange status pills, risk status pill.
 
-BYBIT_API_KEY=replace_with_real_key
-BYBIT_API_SECRET=replace_with_real_secret
+/portfolio → positions table (sortable, filterable), cash/equity breakdown, realized vs unrealized PnL chart, equity curve with drawdown overlay.
 
-# ---------- Go-live attestation ----------
-# Generate with:  openssl rand -hex 32
-# Do NOT reuse across environments.
-QUANTFLOW_GO_LIVE_SIGNING_KEY=replace_with_random_64_hex_chars
+/trades → paginated fills table with filters (symbol, strategy, exchange, date range, side). CSV export. Row click opens detail drawer.
 
-# ---------- Optional overrides ----------
-# Override the default event bus backend: in_memory | redis
-QUANTFLOW_EVENT_BUS_TYPE=in_memory
-Also add to .gitignore (project root):
+/orders → paginated orders table with status badges, lifecycle timeline for a selected order.
 
-gitignore
-.env
-.env.*
-!.env.example
-7. Sample quantflow.yaml (excerpt) — multi-exchange, multi-service
-For the compose environment to actually connect to both exchanges, quantflow.yaml must be updated to the list shape from the multi-exchange spec:
+/signals → paginated signals with approve/reject reason codes, filterable.
 
-yaml
-exchanges:
-  - exchange_id: binance
-    type: binance
-    enabled: true
-    credentials_ref: "env:BINANCE_API_KEY"
-    symbols:
-      "BTC/USDT": "BTCUSDT"
-      "ETH/USDT": "ETHUSDT"
-    rate_limit_overrides:
-      requests_per_second: 20
+/strategies → plugin cards: name, version, active toggle, live metrics, config editor (React Hook Form + Zod), per-strategy equity curve.
 
-  - exchange_id: bybit
-    type: bybit
-    enabled: true
-    credentials_ref: "env:BYBIT_API_KEY"
-    symbols:
-      "BTC/USDT": "BTCUSDT"
-      "ETH/USDT": "ETHUSDT"
-    rate_limit_overrides:
-      requests_per_second: 10
+/risk → current risk status, thresholds editor, emergency stop button (with confirm dialog requiring typing EMERGENCY STOP), circuit breaker state, daily PnL vs limit gauge.
 
-database:
-  host: "{{env:POSTGRES_HOST}}"
-  port: "{{env:POSTGRES_PORT}}"
-  user: "{{env:POSTGRES_USER}}"
-  password: "{{env:POSTGRES_PASSWORD}}"
-  name: "{{env:POSTGRES_DB}}"
+/exchanges → per-exchange cards: connection status, latency, subscribed symbols, reconnect count, enable/disable toggle.
 
-redis:
-  host: "{{env:REDIS_HOST}}"
-  port: "{{env:REDIS_PORT}}"
-  db: "{{env:REDIS_DB}}"
-8. Usage
-First-time setup
-bash
-cp .env.example .env
-# edit .env — at minimum set POSTGRES_PASSWORD and QUANTFLOW_GO_LIVE_SIGNING_KEY
-docker compose build
-Run the app (with hot reload)
-bash
-docker compose up
-# → postgres and redis start
-# → both healthchecks pass
-# → app container starts, entrypoint runs alembic upgrade head
-# → uvicorn serves on http://localhost:8000
-Run the test suite (against real Postgres + Redis)
-bash
-# Full suite
-docker compose --profile test run --rm test
+/logs → live tail with level filter, correlation_id search, pause/play, download.
 
-# A specific file
-docker compose --profile test run --rm test pytest tests/integration/test_order_flow.py
+/backtest → backtest list, run form (strategy, params, date range), job progress, report viewer (Sharpe, Sortino, drawdown, WFE, tier results).
 
-# With verbose + stop on first failure (already the default)
-docker compose --profile test run --rm test pytest -xvs tests/integration
-The test service:
+B6. Real-time chart behavior
+Equity curve: append a new point on each portfolio_update (throttled to 1/s). Use Recharts <LineChart> with isAnimationActive={false} for smoothness.
 
-Uses the same image as the app (quantflow:local), guaranteeing the code under test is the code that runs.
+Ticker display: subscribe to ticker events only for symbols visible on the current page. Send {action: "subscribe", symbols: [...]} on mount, unsubscribe on unmount. The provider tracks refcounts.
 
-Connects to real Postgres (quantflow_test database) and real Redis (logical DB 1).
+Order book (if displayed): use TradingView Lightweight Charts with 20 levels per side, updated on orderbook events. Recreate the book only on snapshot, not on every diff.
 
-Runs migrations automatically against the test DB.
+B7. Execution correctness (production-critical)
+Idempotency: every mutating mutation sends an Idempotency-Key header (UUID v4 generated client-side, cached for the request). The backend must honor it.
 
-Isolated from dev data — tests never touch the quantflow database.
+Optimistic updates: only for strategy.toggle and risk.config.patch. All others are pessimistic (wait for server).
 
-Inspect / debug
-bash
-# Open a shell inside the app image
-docker compose run --rm app bash
+Error handling: every mutation has onError that surfaces a toast with error.message and request_id. Never swallow errors.
 
-# Open psql
-docker compose exec postgres psql -U quantflow -d quantflow
+Reconnect: exponential backoff with jitter, capped at VITE_RECONNECT_MAX_MS. On reconnect, refetch all active queries (queryClient.invalidateQueries()), then re-subscribe to tickers.
 
-# Tail logs
-docker compose logs -f app
-Reset everything
-bash
-docker compose down -v          # removes postgres_data and redis_data volumes
-docker compose build --no-cache
-docker compose up
-9. Design Notes
-Requirement	How it's satisfied
-App waits for Postgres/Redis healthily	depends_on: { condition: service_healthy } + pg_isready / redis-cli ping healthchecks. No sleep.
-Secrets never baked into image	.env excluded in .dockerignore; loaded only via env_file: at runtime.
-Migrations run before traffic	docker/entrypoint.sh runs alembic upgrade head and execs the app only on success.
-Tests hit real Postgres/Redis	test service uses the same image, POSTGRES_DB=quantflow_test, REDIS_DB=1, real service dependencies.
-Same image for app and test	Both build from target: runtime; no separate test image.
-Concurrent exchange connections	Config-driven list (Sprint 14); credentials resolved from .env through EnvSecretsProvider.
-Reproducible local environment	Named volumes, non-root user, tini as PID 1, healthcheck-gated startup.
+Stale WS data guard: if lastMessageAt is older than 10s, show a "Connection stale" banner. If older than 30s, show "Disconnected — reconnecting".
+
+No memory leaks: every subscription (WS, Query, store) must be cleaned up on unmount. Use AbortController for in-flight fetches.
+
+Type safety: no any, no as casts except for unknown narrowing. tsconfig has strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true.
+
+B8. Auth
+JWT stored in httpOnly cookie if backend supports it; otherwise in memory only (never localStorage).
+
+On app load, call GET /api/v1/auth/me to validate session. If 401, redirect to login.
+
+WS connection passes the token via ?token= query param (browser WS API does not support headers). Backend must accept both.
+
+Logout clears cookie/in-memory token and closes the WS connection.
+
+B9. Build & deploy
+npm run build produces dist/ with hashed assets.
+
+Dockerfile.frontend:
+
+Stage 1: node:20-alpine builds the app with VITE\_\* args.
+
+Stage 2: nginx:1.27-alpine serves dist/ with:
+
+try_files $uri /index.html for SPA routing.
+
+/api/ and /ws/ proxied to the backend service (upstream URL from env at container start via envsubst template).
+
+Security headers: X-Content-Type-Options, X-Frame-Options: DENY, Content-Security-Policy with a strict policy allowing only the configured API/WS origins.
+
+Gzip/Brotli for text assets.
+
+Local: extend docker-compose.yml with a frontend service that depends on app being healthy.
+
+Production: docker-compose.prod.yml overrides:
+
+No source mounts.
+
+restart: always.
+
+Resource limits (deploy.resources.limits).
+
+Traefik or Caddy as reverse proxy with TLS (Let's Encrypt).
+
+Postgres and Redis on persistent named volumes with backups (pg_dump cron, Redis AOF).
+
+Logging driver: json-file with rotation, or journald.
+
+Prometheus + Grafana + Alertmanager services, wired to the metrics endpoint and the alert rules from Sprint 15.
+
+B10. Testing
+Unit: stores, selectors, wsRouter, Zod schemas, hooks (useWebSocket, useTicker).
+
+Integration: each page rendered with MSW intercepting REST and mock-socket simulating WS events. Assert store → UI propagation.
+
+E2E: Playwright suite covering (1) login, (2) view portfolio, (3) trigger emergency stop with confirm dialog, (4) watch a fill arrive via WS and appear in the trades table, (5) toggle a strategy and see it persist after reload.
+
+Coverage gate: 80% lines, 70% branches. CI fails below.
+
+B11. CI/CD
+GitHub Actions workflow .github/workflows/ci.yml:
+
+backend: ruff, mypy, pytest --cov on Python 3.12, with Postgres + Redis services.
+
+frontend: tsc --noEmit, eslint, vitest --coverage, npm run build, scripts/check-no-hardcoded.sh.
+
+e2e: Playwright against docker compose up stack.
+
+docker: build both images, push to registry on tag.
+
+B12. Production release checklist
+Before docker compose -f docker-compose.prod.yml up -d:
+
+□ features.enable_live_trading: false in config/quantflow.yaml unless a valid attestation.json exists (Sprint 15).
+□ .env populated with production secrets (Vault reference paths, not literal values).
+□ QUANTFLOW_CORS_ORIGINS set to the exact frontend origin(s).
+□ VITE_API_BASE_URL and VITE_WS_URL point to the production domain (HTTPS/WSS).
+□ TLS certificates provisioned and auto-renewing.
+□ Postgres backups scheduled and restore tested.
+□ Prometheus targets scraping, Alertmanager routing verified with a synthetic alert.
+□ Grafana dashboards imported.
+□ scripts/check-no-hardcoded.sh passes.
+□ All tests green in CI on the release commit.
+□ Go-live attestation signed (if enabling live mode).
+□ Rollback plan documented: previous image tag, DB migration downgrade path, kill switch (emergency stop).
+Deliverables
+Backend: fully implemented, all tests passing, running under docker compose up, exposing the REST + WS surface in A3.
+
+Frontend: fully implemented per B1–B11, zero hardcoded values, all tests passing, building to a production bundle.
+
+docker-compose.yml (dev) and docker-compose.prod.yml (prod) with the frontend service added.
+
+Dockerfile.frontend and nginx.conf.template.
+
+DECISIONS.md: every non-obvious choice, with the reason and the alternative rejected.
+
+RUNBOOK.md: how to deploy, roll back, rotate secrets, respond to each Prometheus alert.
+
+README.md: local dev, running tests, deploying, going live.
+
+scripts/check-no-hardcoded.sh: the CI gate.
+
+Definition of done
+docker compose up brings up Postgres, Redis, backend, and frontend; the dashboard loads at http://localhost:3000 and shows live portfolio/PnL/positions updating via WebSocket.
+
+docker compose --profile test run --rm test passes all backend tests against real Postgres and Redis.
+
+npm run test and npm run build pass in the frontend directory.
+
+scripts/check-no-hardcoded.sh exits 0.
+
+CI is green on the release commit.
+
+docker compose -f docker-compose.prod.yml up -d deploys successfully to the target host, healthchecks pass, and the live dashboard is reachable over HTTPS.
+
+No file in the repository contains a hardcoded API URL, WS URL, credential, or trading constant.
+
+Work through Phase A end-to-end before starting Phase B. Commit in logical chunks with descriptive messages. Do not stop for confirmation — make the best engineering decision and document it.

@@ -42,6 +42,65 @@ class APIState:
             "Trend Follower": False,
         }
         self._emergency_stop: bool = False
+        self._strategy_configs: dict[str, dict[str, Any]] = {
+            "Simple Momentum": {"period": 20, "threshold": 0.02, "timeframe": "1m"},
+            "Mean Reversion": {"window": 30, "std_dev": 2.0, "timeframe": "5m"},
+            "Trend Follower": {"fast_period": 10, "slow_period": 50, "timeframe": "15m"},
+        }
+        self._risk_config: dict[str, Any] = {
+            "max_position_qty": 5.0,
+            "max_daily_loss": 1000.0,
+            "max_total_exposure": 100000.0,
+            "allowed_symbols": ["BTC/USDT", "ETH/USDT"],
+            "trading_schedule": "00:00-23:59",
+        }
+        self._exchanges: dict[str, dict[str, Any]] = {
+            "binance": {
+                "id": "binance",
+                "name": "Binance Spot/Futures",
+                "type": "crypto",
+                "enabled": True,
+                "connected": True,
+                "latency_ms": 42.0,
+                "last_heartbeat": datetime.now(UTC).isoformat(),
+                "symbols_subscribed": ["BTC/USDT", "ETH/USDT"],
+            },
+            "bybit": {
+                "id": "bybit",
+                "name": "Bybit Perpetual",
+                "type": "crypto",
+                "enabled": True,
+                "connected": True,
+                "latency_ms": 55.0,
+                "last_heartbeat": datetime.now(UTC).isoformat(),
+                "symbols_subscribed": ["BTC/USDT", "ETH/USDT"],
+            },
+        }
+        self._backtest_runs: list[dict[str, Any]] = [
+            {
+                "id": "run-001",
+                "strategy_name": "Simple Momentum",
+                "start_date": "2024-01-01",
+                "end_date": "2024-06-01",
+                "status": "completed",
+                "created_at": "2024-06-02T10:00:00Z",
+                "sharpe": 1.85,
+                "win_rate": 0.62,
+                "total_return": 0.28,
+                "max_drawdown": 0.09,
+                "params": {"period": 20, "threshold": 0.02},
+                "metrics": {
+                    "sharpe": 1.85,
+                    "sortino": 2.4,
+                    "profit_factor": 2.1,
+                    "trades": 142,
+                },
+                "equity_curve": [],
+                "trades": [],
+            }
+        ]
+        self._backtest_jobs: dict[str, dict[str, Any]] = {}
+
         self._exchange_status: list[dict[str, Any]] = [
             {
                 "name": "binance",
@@ -399,6 +458,99 @@ class APIState:
     def toggle_strategy(self, name: str, active: bool) -> tuple[str, bool]:
         self._strategy_toggles[name] = active
         return name, active
+
+    def get_strategy_config(self, name: str) -> dict[str, Any]:
+        return self._strategy_configs.get(
+            name, {"period": 20, "threshold": 0.02, "timeframe": "1m"}
+        )
+
+    def update_strategy_config(
+        self, name: str, config: dict[str, Any]
+    ) -> dict[str, Any]:
+        curr = self._strategy_configs.setdefault(name, {})
+        curr.update(config)
+        return curr
+
+    def update_risk_config(self, updates: dict[str, Any]) -> dict[str, Any]:
+        for k, v in updates.items():
+            if v is not None:
+                self._risk_config[k] = v
+        return self._risk_config
+
+    def get_exchanges(self) -> list[dict[str, Any]]:
+        return list(self._exchanges.values())
+
+    def get_exchange_status_by_id(
+        self, exchange_id: str
+    ) -> dict[str, Any] | None:
+        return self._exchanges.get(exchange_id)
+
+    def toggle_exchange(
+        self, exchange_id: str, enabled: bool
+    ) -> dict[str, Any]:
+        if exchange_id not in self._exchanges:
+            self._exchanges[exchange_id] = {
+                "id": exchange_id,
+                "name": exchange_id.title(),
+                "type": "crypto",
+                "enabled": enabled,
+                "connected": enabled,
+                "latency_ms": 50.0 if enabled else 0.0,
+                "last_heartbeat": datetime.now(UTC).isoformat(),
+                "symbols_subscribed": [],
+            }
+        else:
+            self._exchanges[exchange_id]["enabled"] = enabled
+            self._exchanges[exchange_id]["connected"] = enabled
+        return self._exchanges[exchange_id]
+
+    def get_backtest_runs(self) -> list[dict[str, Any]]:
+        return self._backtest_runs
+
+    def get_backtest_run(self, run_id: str) -> dict[str, Any] | None:
+        for r in self._backtest_runs:
+            if r["id"] == run_id:
+                return r
+        return None
+
+    def submit_backtest_job(self, data: dict[str, Any]) -> str:
+        job_id = f"job-{uuid4().hex[:8]}"
+        run_id = f"run-{uuid4().hex[:8]}"
+        self._backtest_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "completed",
+            "progress": 1.0,
+            "run_id": run_id,
+            "error": None,
+        }
+        self._backtest_runs.insert(
+            0,
+            {
+                "id": run_id,
+                "strategy_name": data.get("strategy_name", "Simple Momentum"),
+                "start_date": data.get("start_date", "2024-01-01"),
+                "end_date": data.get("end_date", "2024-06-01"),
+                "status": "completed",
+                "created_at": datetime.now(UTC).isoformat(),
+                "sharpe": 1.72,
+                "win_rate": 0.58,
+                "total_return": 0.22,
+                "max_drawdown": 0.11,
+                "params": data.get("parameters", {}),
+                "metrics": {
+                    "sharpe": 1.72,
+                    "sortino": 2.1,
+                    "profit_factor": 1.9,
+                    "trades": 88,
+                },
+                "equity_curve": [],
+                "trades": [],
+            },
+        )
+        return job_id
+
+    def get_backtest_job(self, job_id: str) -> dict[str, Any] | None:
+        return self._backtest_jobs.get(job_id)
 
 
 # Global state holder
