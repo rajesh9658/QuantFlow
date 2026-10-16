@@ -90,6 +90,25 @@ services:
       - "8000"
       - --reload
 
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+        VITE_WS_URL: ws://localhost:8000/ws/dashboard
+        VITE_APP_ENV: development
+        VITE_AUTH_MODE: dev-bypass
+    image: quantflow-frontend:local
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    environment:
+      BACKEND_UPSTREAM_URL: http://app:8000
+    depends_on:
+      app:
+        condition: service_healthy
+
   # -----------------------------------------------------------------
   # Test runner — same image, separate database, activated via profile.
   #   docker compose --profile test run --rm test

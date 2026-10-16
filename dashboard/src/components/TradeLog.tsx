@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { TradeExecution } from '../types/dashboard';
-import { History, Filter, ArrowDownRight, ArrowUpRight } from 'lucide-react';
+import { History, ArrowDownRight, ArrowUpRight } from 'lucide-react';
 
 interface TradeLogProps {
   trades?: TradeExecution[];
@@ -72,7 +72,8 @@ export const TradeLog: React.FC<TradeLogProps> = ({
       minimumFractionDigits: 2,
     }).format(num);
 
-  const formatTime = (ts: string) => {
+  const formatTime = (ts?: string | null) => {
+    if (!ts) return 'N/A';
     try {
       return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     } catch {

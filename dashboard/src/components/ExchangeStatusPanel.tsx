@@ -30,7 +30,8 @@ export const ExchangeStatusPanel: React.FC<ExchangeStatusPanelProps> = ({
 }) => {
   const list = (exchanges && exchanges.length > 0) ? exchanges : defaultExchanges;
 
-  const formatHeartbeat = (ts: string) => {
+  const formatHeartbeat = (ts?: string | null) => {
+    if (!ts) return 'N/A';
     try {
       return new Date(ts).toLocaleTimeString();
     } catch {

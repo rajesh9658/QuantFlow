@@ -193,7 +193,7 @@ export const PnLChart: React.FC<PnLChartProps> = ({
                   />
                   <circle
                     cx={getX(hoverIndex)}
-                    cy={getY(points[hoverIndex].equity)}
+                    cy={getY(points[hoverIndex]?.equity ?? 0)}
                     r="4.5"
                     fill="#06b6d4"
                     stroke="#0f172a"

@@ -1,6 +1,6 @@
 import React from 'react';
 import { RiskStatus } from '../types/dashboard';
-import { ShieldAlert, AlertTriangle, CheckCircle2, Flame, Power } from 'lucide-react';
+import { ShieldAlert, CheckCircle2, Flame, Power } from 'lucide-react';
 
 interface RiskStatusPanelProps {
   riskStatus?: RiskStatus | null;

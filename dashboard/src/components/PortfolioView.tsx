@@ -1,6 +1,6 @@
 import React from 'react';
 import { PortfolioSnapshot } from '../types/dashboard';
-import { Wallet, TrendingUp, TrendingDown, DollarSign, ShieldAlert, Layers } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, DollarSign, Layers } from 'lucide-react';
 
 interface PortfolioViewProps {
   portfolio?: PortfolioSnapshot | null;

@@ -1,6 +1,6 @@
 import React from 'react';
 import { StrategySummary } from '../types/dashboard';
-import { Cpu, Check, X, TrendingUp, Percent, Hash } from 'lucide-react';
+import { Cpu } from 'lucide-react';
 
 interface StrategyStatusPanelProps {
   strategies?: StrategySummary[];

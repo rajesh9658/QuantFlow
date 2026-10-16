@@ -77,7 +77,7 @@ def setup_logging(level: str = "INFO", json_format: bool = False) -> logging.Log
     handler.addFilter(CorrelationIdFilter())
 
     logger.addHandler(handler)
-    logger.propagate = False
+    logger.propagate = True
     return logger
 
 

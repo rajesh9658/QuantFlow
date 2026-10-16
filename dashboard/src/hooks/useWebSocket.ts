@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { WSMessage } from '../types/dashboard';
+import { env } from '../config/env';
 
 export interface WebSocketOptions {
   url?: string;
@@ -10,9 +11,7 @@ export interface WebSocketOptions {
 
 export function useWebSocket(options: WebSocketOptions = {}) {
   const {
-    url = (typeof window !== 'undefined'
-      ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/dashboard`
-      : 'ws://localhost:8000/ws/dashboard'),
+    url = env.VITE_WS_URL,
     token,
     onMessage,
     reconnect = true,

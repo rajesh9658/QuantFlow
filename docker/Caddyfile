@@ -1,0 +1,31 @@
+{$DOMAIN} {
+    encode gzip zstd
+
+    # Security Headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # API Proxy
+    handle /api/* {
+        reverse_proxy app:8000
+    }
+
+    # WebSocket Proxy
+    handle /ws/* {
+        reverse_proxy app:8000
+    }
+
+    # Prometheus metrics internal guard
+    handle /metrics {
+        respond "Access Denied" 403
+    }
+
+    # Frontend SPA
+    handle {
+        reverse_proxy frontend:80
+    }
+}
