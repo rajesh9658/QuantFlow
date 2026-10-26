@@ -13,7 +13,13 @@ from collections import deque
 from typing import Any
 
 # NOTE: only events + abstract interfaces — no execution imports.
-from quantflow.common.events import Event, SignalEvent, TickEvent, FillEvent, RejectedSignalEvent
+from quantflow.common.events import (
+    Event,
+    FillEvent,
+    RejectedSignalEvent,
+    SignalEvent,
+    TickEvent,
+)
 from quantflow.core.event_bus import AsyncEventBus
 from quantflow.core.interfaces import Strategy
 

@@ -8,12 +8,11 @@ import inspect
 
 import pytest
 
-from quantflow.common.events import Event, SignalEvent, TickEvent, FillEvent
+from quantflow.common.events import Event, FillEvent, SignalEvent, TickEvent
 from quantflow.core.event_bus import AsyncEventBus
 from quantflow.core.interfaces import Strategy
 from quantflow.strategies.engine import StrategyEngine
 from quantflow.strategies.momentum.strategy import SimpleMomentumStrategy
-
 
 # ── helpers ──────────────────────────────────────────────────────
 

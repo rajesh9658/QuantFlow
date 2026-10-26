@@ -39,7 +39,6 @@ from quantflow.portfolio.engine import PortfolioEngine
 from quantflow.risk.engine import RiskEngine
 from quantflow.strategies.momentum.strategy import SimpleMomentumStrategy
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _make_tick(symbol: str = "BTC/USDT", price: float = 50000.0,
@@ -72,8 +71,8 @@ async def test_chaos_orderbook_resync_on_ws_kill() -> None:
 
 @pytest.mark.asyncio
 async def test_chaos_no_fill_from_uninitialized_book() -> None:
-    from quantflow.execution.fill_simulator import FeeSchedule, simulate_fill
     from quantflow.common.events import OrderEvent
+    from quantflow.execution.fill_simulator import FeeSchedule, simulate_fill
     book = LocalOrderBook("BTC/USDT")
     order = OrderEvent(strategy_id="t", symbol="BTC/USDT", exchange_id="paper",
                        side="BUY", order_type="MARKET", quantity=1.0)
@@ -218,8 +217,8 @@ async def test_quant_position_flip_long_to_short() -> None:
 
 @pytest.mark.asyncio
 async def test_fill_simulator_walks_depth() -> None:
-    from quantflow.execution.fill_simulator import FeeSchedule, simulate_fill
     from quantflow.common.events import OrderEvent
+    from quantflow.execution.fill_simulator import FeeSchedule, simulate_fill
     book = {"bids": [], "asks": [[50000.0, 1.0], [50100.0, 2.0]]}
     order = OrderEvent(strategy_id="t", symbol="BTC/USDT", exchange_id="paper",
                        side="BUY", order_type="MARKET", quantity=3.0)
@@ -233,8 +232,8 @@ async def test_fill_simulator_walks_depth() -> None:
 
 @pytest.mark.asyncio
 async def test_fill_never_uses_mid_price() -> None:
-    from quantflow.execution.fill_simulator import FeeSchedule, simulate_fill
     from quantflow.common.events import OrderEvent
+    from quantflow.execution.fill_simulator import FeeSchedule, simulate_fill
     book = {"bids": [[49990.0, 1.0]], "asks": [[50010.0, 1.0]]}
     order = OrderEvent(strategy_id="t", symbol="BTC/USDT", exchange_id="paper",
                        side="BUY", order_type="MARKET", quantity=1.0)

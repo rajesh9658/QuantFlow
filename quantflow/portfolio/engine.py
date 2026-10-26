@@ -9,7 +9,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
-from quantflow.portfolio.ledger import AccountLedger
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -22,6 +21,7 @@ from quantflow.database.repository import (
     PortfolioRepository,
     PositionRepository,
 )
+from quantflow.portfolio.ledger import AccountLedger
 
 logger = get_logger("portfolio_engine")
 

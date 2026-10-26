@@ -293,7 +293,8 @@ def test_default_state_has_no_fake_performance_or_connectivity():
 
 @pytest.mark.asyncio
 async def test_main_application_starts_pipeline_and_no_demo_feed(monkeypatch):
-    from quantflow.main import create_app as main_app, lifespan
+    from quantflow.main import create_app as main_app
+    from quantflow.main import lifespan
     monkeypatch.setenv("APP_ENV", "paper")
     app = main_app()
     async with lifespan(app):

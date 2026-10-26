@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 from quantflow.analytics.engine import AnalyticsEngine
 from quantflow.backtesting.engine import BacktestEngine, build_backtest_pipeline
-from quantflow.common.events import FillEvent, PortfolioUpdateEvent, TickEvent
+from quantflow.common.events import PortfolioUpdateEvent, TickEvent
 from quantflow.config.manager import ConfigManager
 from quantflow.core.event_bus import InMemoryEventBus
 from quantflow.replay.event_store import InMemoryEventStoreReader
@@ -117,9 +117,10 @@ async def main() -> None:
         "ticks_per_second": len(many)/elapsed, "reported_event_count": run.event_count,
         "success": run.success}
 
+    import httpx
+
     from quantflow.api.dependencies import get_api_state
     from quantflow.main import create_app, lifespan
-    import httpx
     # Replace config and environment only during isolated paper startup.
     with patch.dict("os.environ", {"APP_ENV": "development", "QUANTFLOW_EVENT_BUS_TYPE": "in_memory"}), \
             patch("quantflow.main.ConfigManager", return_value=cfg):

@@ -8,13 +8,19 @@ from datetime import UTC, datetime
 from typing import Any
 
 from quantflow.analytics.engine import AnalyticsEngine
-from quantflow.common.events import FillEvent, OrderBookEvent, RejectedSignalEvent, SignalEvent, TickEvent, OrderEvent
+from quantflow.common.events import (
+    FillEvent,
+    OrderBookEvent,
+    OrderEvent,
+    RejectedSignalEvent,
+    SignalEvent,
+    TickEvent,
+)
 from quantflow.config.manager import ConfigManager
 from quantflow.core.clock import SimulatedClock
 from quantflow.core.event_bus import AsyncEventBus, InMemoryEventBus
 from quantflow.core.interfaces import Strategy
 from quantflow.execution.paper import PaperExecutionHandler
-from quantflow.exchanges.null import NullExchangeAdapter  # public compatibility export
 from quantflow.market_data.engine import MarketDataEngine
 from quantflow.market_data.orderbook import LocalOrderBook
 from quantflow.portfolio.engine import PortfolioEngine

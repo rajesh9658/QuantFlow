@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from dataclasses import dataclass
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from quantflow.common.events import FillEvent

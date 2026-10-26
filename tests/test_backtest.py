@@ -2,30 +2,25 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import math
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from quantflow.backtesting.engine import (
     BacktestEngine,
-    BacktestPipeline,
     BacktestResult,
-    build_backtest_pipeline,
 )
 from quantflow.backtesting.optimizer import (
     FoldResult,
     ParameterSweepRunner,
     SignificanceEvaluator,
-    SignificanceReport,
-    SweepResult,
     WalkForwardReport,
     WalkForwardValidator,
     Window,
     _norm_cdf,
     _norm_ppf,
     deflated_sharpe_ratio,
-    expand_grid,
     generate_windows,
 )
 from quantflow.common.events import TickEvent

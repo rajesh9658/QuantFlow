@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
+import math
 from collections.abc import Callable, Iterator
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-import itertools
-import math
 from typing import Any
 
 from quantflow.backtesting.engine import BacktestEngine, BacktestResult
