@@ -1,6 +1,7 @@
 """In-process asyncio implementation of EventBus."""
 
 import asyncio
+import inspect
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
@@ -87,12 +88,12 @@ class AsyncEventBus(EventBus):
                 handlers_to_call.extend(self._subscribers.get(et, []))
                 queues_to_put.extend(self._queues.get(et, []))
 
-        # Deliver to callback handlers concurrently
-        if handlers_to_call:
-            await asyncio.gather(
-                *(handler(event) for handler in handlers_to_call),
-                return_exceptions=True,
-            )
+        # Preserve registration order: books and financial state must be updated
+        # before a strategy consumes the same event. Critical failures propagate.
+        for handler in handlers_to_call:
+            result = handler(event)
+            if inspect.isawaitable(result):
+                await result
 
         # Deliver to subscriber queues with backpressure protection
         for q in queues_to_put:

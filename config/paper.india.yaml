@@ -1,0 +1,30 @@
+# Research estimates only. No live exchange connections or order placement.
+environment: paper
+log_level: INFO
+portfolio:
+  initial_cash: 200.0
+tax:
+  rate: 0.312  # 30% plus 4% cess, no surcharge; quote-currency estimate only
+market_data:
+  source: none  # explicitly choose demo for fabricated streaming prices
+demo:
+  enabled: false  # fixture account history is disabled
+analytics:
+  risk_free_rate: 0.0
+  annualization_factor: 365.0
+risk:
+  allowed_symbols: [BTC/USDT]
+  max_position_qty: 1.0
+  max_position_notional: 40.0
+  max_total_exposure: 40.0
+  max_daily_loss: 4.0
+strategies:
+  SimpleMomentum:
+    symbol: BTC/USDT
+    period: 20
+    threshold: 0.02
+    order_notional: 20.0
+backtest:
+  close_at_end: true
+  # Supply an actual top-of-book historical dataset; no default demo results.
+  data_path: null

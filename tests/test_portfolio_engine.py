@@ -46,7 +46,7 @@ async def test_single_buy_fill_updates_cash_and_position() -> None:
     assert not pos.is_empty()
 
     assert engine.get_positions() == {"BTC/USDT": 2.0}
-    assert engine.get_realized_pnl() == 0.0
+    assert engine.get_realized_pnl() == -15.0
 
     await engine.stop()
 
@@ -251,7 +251,7 @@ async def test_partial_reduction_and_full_close_computes_realized_pnl() -> None:
 
     # Cash = -10 + (55000 - 5) = 54985.0
     assert engine.get_cash() == pytest.approx(54985.0)
-    assert engine.get_realized_pnl() == pytest.approx(5000.0)
+    assert engine.get_realized_pnl() == pytest.approx(4985.0)
 
     # Remaining position is 1.0 @ 50,000 (avg entry price unchanged)
     pos = engine.get_position("BTC/USDT")
@@ -273,7 +273,7 @@ async def test_partial_reduction_and_full_close_computes_realized_pnl() -> None:
     await asyncio.sleep(0.02)
 
     # Cumulative Realized PnL = 5000 + 10000 = 15000.0
-    assert engine.get_realized_pnl() == pytest.approx(15000.0)
+    assert engine.get_realized_pnl() == pytest.approx(14979.0)
     # Cash = 54985 + (60000 - 6) = 114979.0 (Net gain: 15000 PnL - 21 total fees)
     assert engine.get_cash() == pytest.approx(114979.0)
     # Position is fully closed and removed
@@ -490,7 +490,7 @@ async def test_portfolio_update_event_fires_exactly_once_per_state_change() -> N
     ev1 = published_events[0]
     assert ev1.cash == pytest.approx(50000.0 - 40005.0)
     assert ev1.positions == {"BTC/USDT": 1.0}
-    assert ev1.realized_pnl == 0.0
+    assert ev1.realized_pnl == -5.0
 
     # 2. Mark price update without fill
     await engine.update_mark_price("BTC/USDT", 42000.0)
@@ -517,7 +517,7 @@ async def test_portfolio_update_event_fires_exactly_once_per_state_change() -> N
     assert len(published_events) == 3
     ev3 = published_events[2]
     assert ev3.positions == {}
-    assert ev3.realized_pnl == pytest.approx(2000.0)
+    assert ev3.realized_pnl == pytest.approx(1990.0)
     assert ev3.unrealized_pnl == 0.0
 
     await engine.stop()
@@ -593,6 +593,6 @@ def test_synchronous_portfolio_manager_update_position() -> None:
     )
     engine.update_position(fill2)
 
-    assert engine.get_realized_pnl() == pytest.approx(100.0)
+    assert engine.get_realized_pnl() == pytest.approx(98.0)
     assert engine.get_positions() == {}
     assert engine.get_cash() == pytest.approx(50000.0 - 501.0 + 599.0)

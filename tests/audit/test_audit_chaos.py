@@ -98,8 +98,11 @@ async def test_chaos_exchange_isolation() -> None:
 
     await bus.subscribe(TickEvent, handler_a)
     await bus.subscribe(TickEvent, handler_b)
-    await bus.publish(_make_tick())
-    assert len(received_b) == 1
+    with pytest.raises(RuntimeError, match="Exchange A down"):
+        await bus.publish(_make_tick())
+    # Critical errors are visible, and downstream handlers cannot trade using
+    # a partially updated market/account state.
+    assert len(received_b) == 0
 
 
 # ── CHAOS-3: EventBus flood ───────────────────────────────────────────────────

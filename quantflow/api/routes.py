@@ -192,7 +192,10 @@ async def toggle_strategy(
     state: Annotated[APIState, Depends(get_api_state)],
 ) -> StrategyToggleResponse:
     """Toggle strategy active state."""
-    strat_name, active = state.toggle_strategy(name, body.active)
+    try:
+        strat_name, active = state.toggle_strategy(name, body.active)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return StrategyToggleResponse(name=strat_name, active=active)
 
 
@@ -334,7 +337,10 @@ async def update_strategy_config(
     state: Annotated[APIState, Depends(get_api_state)],
 ) -> StrategyConfigResponse:
     """Hot-reload strategy parameter configuration."""
-    cfg = state.update_strategy_config(name, body.config)
+    try:
+        cfg = state.update_strategy_config(name, body.config)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return StrategyConfigResponse(name=name, config=cfg)
 
 
@@ -397,7 +403,10 @@ async def toggle_exchange(
     state: Annotated[APIState, Depends(get_api_state)],
 ) -> ExchangeToggleResponse:
     """Toggle connection and order routing for a specific exchange adapter."""
-    res = state.toggle_exchange(id, body.enabled)
+    try:
+        res = state.toggle_exchange(id, body.enabled)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ExchangeToggleResponse(id=id, enabled=res["enabled"])
 
 
@@ -443,7 +452,12 @@ async def trigger_backtest_run(
     state: Annotated[APIState, Depends(get_api_state)],
 ) -> BacktestRunResponse:
     """Trigger an asynchronous backtest simulation job."""
-    job_id = state.submit_backtest_job(body.model_dump())
+    try:
+        job_id = state.submit_backtest_job(body.model_dump())
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OverflowError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     return BacktestRunResponse(job_id=job_id, status="queued")
 
 

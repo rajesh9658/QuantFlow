@@ -440,6 +440,7 @@ class Portfolio(Base):
         DECIMAL(20, 10), nullable=False
     )
     realized_pnl: Mapped[float] = mapped_column(DECIMAL(20, 10), default=0.0)
+    ledger_state: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     unrealized_pnl: Mapped[float] = mapped_column(DECIMAL(20, 10), default=0.0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

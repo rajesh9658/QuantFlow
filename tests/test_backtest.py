@@ -78,12 +78,12 @@ async def test_single_backtest_run_over_fixture_produces_analytics_report() -> N
     end = (ticks[-1].timestamp_received or start) + timedelta(seconds=1)
 
     store = InMemoryEventStoreReader(ticks)
-    engine = BacktestEngine()
+    engine = BacktestEngine(ConfigManager(defaults={"portfolio": {"initial_cash": 100000.0}}, env_dict={} ))
 
     result: BacktestResult = await engine.run(
         data_reader=store,
         strategy_cls=SimpleMomentumStrategy,
-        params={"symbol": "BTC/USDT", "period": 5, "threshold": 0.01},
+        params={"symbol": "BTC/USDT", "period": 5, "threshold": 0.01, "quantity": 1.0},
         start=start,
         end=end,
     )
@@ -91,7 +91,7 @@ async def test_single_backtest_run_over_fixture_produces_analytics_report() -> N
     # 1. Backtest status
     assert result.success is True
     assert result.error is None
-    assert result.event_count == 4  # 2 signals + 2 fills
+    assert result.event_count == len(ticks)
 
     # 2. Hand-verifiable signals
     assert len(result.signals) == 2
@@ -113,7 +113,9 @@ async def test_single_backtest_run_over_fixture_produces_analytics_report() -> N
     assert sell_trade["price"] == 49799.0  # filled at bid price (49800 - 1)
 
     # Realized loss: 49799 - 50801 = -1002.0
-    assert math.isclose(sell_trade["realized_pnl"], -1002.0, rel_tol=1e-3)
+    assert math.isclose(sell_trade["gross_realized_pnl"], -1002.0, rel_tol=1e-3)
+    assert sell_trade["realized_pnl"] == pytest.approx(-1002.0 - 49.799)
+    assert result.metrics["total_commission"] == pytest.approx(100.6)
 
     # 4. Analytics metrics report
     metrics = result.metrics

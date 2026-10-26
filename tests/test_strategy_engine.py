@@ -8,7 +8,7 @@ import inspect
 
 import pytest
 
-from quantflow.common.events import Event, SignalEvent, TickEvent
+from quantflow.common.events import Event, SignalEvent, TickEvent, FillEvent
 from quantflow.core.event_bus import AsyncEventBus
 from quantflow.core.interfaces import Strategy
 from quantflow.strategies.engine import StrategyEngine
@@ -134,6 +134,8 @@ async def test_momentum_sell_signal() -> None:
     await engine.start()
 
     # Feed 6 prices: 100 → 97 (3% drop > 2% threshold)
+    await bus.publish(FillEvent(order_id="prior_buy", symbol="BTC/USDT", side="BUY",
+                               quantity=0.2, fill_price=100.0))
     prices = [100.0, 99.5, 99.0, 98.5, 98.0, 97.0]
     for p in prices:
         await bus.publish(_tick(last=p))

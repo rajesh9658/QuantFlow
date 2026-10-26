@@ -1,0 +1,183 @@
+{
+  "unaffordable_backtest": {
+    "success": true,
+    "signals": 1,
+    "fills": [],
+    "rejected": [
+      {
+        "signal_id": "79d28e13-92fc-4c58-900b-495e0a8d32c6",
+        "reason": "INSUFFICIENT_CASH",
+        "timestamp": "2026-01-01 00:00:05+00:00"
+      }
+    ],
+    "metrics": {
+      "sharpe_ratio": 0.0,
+      "sortino_ratio": 0.0,
+      "max_drawdown": 0.0,
+      "current_drawdown": 0.0,
+      "win_rate": 0.0,
+      "profit_factor": 0.0,
+      "avg_trade": 0.0,
+      "avg_slippage": 0.0,
+      "avg_latency": 0.0,
+      "total_trades": 0.0,
+      "total_return": 0.0,
+      "initial_cash": 200.0,
+      "final_equity": 200.0,
+      "total_commission": 0.0,
+      "taxable_gains_estimate": 0.0,
+      "tax_reserve_estimate": 0.0,
+      "after_tax_equity_estimate": 200.0,
+      "after_tax_pnl_estimate": 0.0,
+      "after_tax_return_estimate": 0.0,
+      "available_cash_after_tax_reserve": 200.0,
+      "open_position_count": 0.0
+    },
+    "equity_curve": [
+      [
+        "2026-01-01 00:00:00+00:00",
+        200.0
+      ],
+      [
+        "2026-01-01 00:00:01+00:00",
+        200.0
+      ],
+      [
+        "2026-01-01 00:00:02+00:00",
+        200.0
+      ],
+      [
+        "2026-01-01 00:00:03+00:00",
+        200.0
+      ],
+      [
+        "2026-01-01 00:00:04+00:00",
+        200.0
+      ],
+      [
+        "2026-01-01 00:00:05+00:00",
+        200.0
+      ],
+      [
+        "2026-01-01 00:00:06+00:00",
+        200.0
+      ],
+      [
+        "2026-01-01 00:00:07+00:00",
+        200.0
+      ],
+      [
+        "2026-01-01 00:00:08+00:00",
+        200.0
+      ],
+      [
+        "2026-01-01 00:00:09+00:00",
+        200.0
+      ],
+      [
+        "2026-01-01 00:00:10+00:00",
+        200.0
+      ],
+      [
+        "2026-01-01 00:00:11+00:00",
+        200.0
+      ]
+    ]
+  },
+  "cash_and_risk": {
+    "snapshots": [
+      {
+        "cash": 200.0,
+        "equity": 200.0
+      },
+      {
+        "cash": 200.0,
+        "equity": 200.0
+      },
+      {
+        "cash": 200.0,
+        "equity": 200.0
+      },
+      {
+        "cash": 200.0,
+        "equity": 200.0
+      },
+      {
+        "cash": 200.0,
+        "equity": 200.0
+      },
+      {
+        "cash": 200.0,
+        "equity": 200.0
+      },
+      {
+        "cash": 179.98,
+        "equity": 199.98
+      },
+      {
+        "cash": 179.98,
+        "equity": 199.90086769945472
+      },
+      {
+        "cash": 179.98,
+        "equity": 199.822129091947
+      },
+      {
+        "cash": 179.98,
+        "equity": 199.74339048443926
+      },
+      {
+        "cash": 179.98,
+        "equity": 199.66465187693154
+      },
+      {
+        "cash": 179.98,
+        "equity": 199.58591326942383
+      },
+      {
+        "cash": 199.5659140568099,
+        "equity": 199.5659140568099
+      }
+    ],
+    "final_equity": 199.5659140568099,
+    "portfolio_realized_pnl": -0.4340859431900947,
+    "risk_daily_pnl": -0.4340859431900947,
+    "risk_positions": {},
+    "portfolio_positions": {}
+  },
+  "stale_valuation": {
+    "equity_before_explicit_mark": 200.45203795200882,
+    "equity_after_explicit_mark": 200.45203795200882
+  },
+  "subscriber_failure": "handler RuntimeError propagated to caller",
+  "publish_50_slow_False_seconds": 0.0004222000716254115,
+  "publish_50_slow_True_seconds": 0.9653516999678686,
+  "daily_return": {
+    "expected": 0.1,
+    "observed_mean": 0.1
+  },
+  "replay_benchmark": {
+    "input_ticks": 10000,
+    "wall_seconds": 1.7664485999848694,
+    "ticks_per_second": 5661.076127596159,
+    "reported_event_count": 10000,
+    "success": true
+  },
+  "startup": {
+    "health_status": 200,
+    "health_body": {
+      "status": "ok",
+      "version": "0.1.0",
+      "started_at": "2026-10-26T17:40:38.942790+00:00",
+      "execution_mode": "paper",
+      "demo_fixtures": false,
+      "data_source": "none"
+    },
+    "analytics_running": true,
+    "strategy_engine_running": true,
+    "strategy_count": 1,
+    "exchanges_reported": [],
+    "nonexistent_strategy_error": "Unknown strategy; supported strategy is Simple Momentum",
+    "backtest_runs": []
+  }
+}

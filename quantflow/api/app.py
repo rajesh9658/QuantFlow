@@ -59,7 +59,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     state = get_api_state()
     if state.event_bus:
         await ws_manager.subscribe_to_event_bus(state.event_bus)
-    yield
+    try:
+        yield
+    finally:
+        await state.close()
+        await ws_manager.unsubscribe_from_event_bus()
 
 
 def create_app() -> FastAPI:
@@ -129,7 +133,20 @@ def create_app() -> FastAPI:
             "status": "ok",
             "version": "0.1.0",
             "started_at": _started_at,
+            "execution_mode": "paper",
+            "demo_fixtures": get_api_state().demo_mode,
+            "data_source": get_api_state().config.get("market_data.source", "none"),
         }
+
+    @app.get("/ready", tags=["Health"])
+    async def readiness() -> JSONResponse:
+        ready = bool(getattr(app.state, "pipeline_started", False))
+        return JSONResponse(status_code=200 if ready else 503,
+            content={"ready": ready, "execution_mode": "paper",
+                     "data_source": getattr(app.state, "data_source", "none"),
+                     "market_feed_available": getattr(app.state, "data_source", "none") != "none",
+                     "historical_data_configured": bool(get_api_state().config.get("backtest.data_path")),
+                     "live_trading_supported": False})
 
     @app.get("/metrics", tags=["Monitoring"])
     async def prometheus_metrics() -> Response:

@@ -87,6 +87,7 @@ class SignalEvent(Event):
     quantity: float
     signal_strength: float = 1.0
     price: float | None = None
+    order_type: str = "MARKET"
     event_type: str = "SIGNAL"
     schema_version: int = 2
 
@@ -195,6 +196,7 @@ class ApprovedSignalEvent(Event):
     quantity: float
     signal_strength: float = 1.0
     price: float | None = None
+    order_type: str = "MARKET"
     event_type: str = "APPROVED_SIGNAL"
     schema_version: int = 2
 

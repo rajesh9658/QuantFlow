@@ -348,6 +348,7 @@ class PortfolioRepository(BaseRepository):
         total_exposure: float,
         realized_pnl: float = 0.0,
         unrealized_pnl: float = 0.0,
+        ledger_state: dict[str, Any] | None = None,
     ) -> Portfolio:
         """Insert or update portfolio financial snapshot."""
         port = await self.get(portfolio_id)
@@ -359,6 +360,7 @@ class PortfolioRepository(BaseRepository):
                 total_exposure=total_exposure,
                 realized_pnl=realized_pnl,
                 unrealized_pnl=unrealized_pnl,
+                ledger_state=ledger_state,
             )
             self.session.add(port)
         else:
@@ -367,6 +369,7 @@ class PortfolioRepository(BaseRepository):
             port.total_exposure = total_exposure
             port.realized_pnl = realized_pnl
             port.unrealized_pnl = unrealized_pnl
+            port.ledger_state = ledger_state
             port.updated_at = self._now()
         await self.session.flush()
         return port

@@ -1,6 +1,7 @@
 """Layered configuration manager supporting defaults, YAML files, and env overrides."""
 
 import json
+import copy
 import os
 from pathlib import Path
 from typing import Any
@@ -58,6 +59,14 @@ class ConfigManager:
     3. Default values dictionary
     """
 
+    def set(self, key: str, value: Any) -> None:
+        """Update a runtime setting using the same dotted paths as get()."""
+        parts = key.split(".")
+        current = self._config
+        for part in parts[:-1]:
+            current = current.setdefault(part, {})
+        current[parts[-1]] = value
+
     def __init__(
         self,
         config_path: str | Path | None = None,
@@ -76,7 +85,7 @@ class ConfigManager:
 
         # 1. Load defaults
         if defaults:
-            _deep_update(self._config, defaults)
+            _deep_update(self._config, copy.deepcopy(defaults))
 
         # 2. Load YAML config
         if config_path:

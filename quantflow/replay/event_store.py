@@ -53,14 +53,23 @@ class InMemoryEventStoreReader(EventStoreReader):
 
     def __init__(self, events: Sequence[Event] | None = None) -> None:
         self._events: list[Event] = list(events or [])
+        self._sorted_cache: list[Event] | None = None
+
+    def _ordered_events(self) -> list[Event]:
+        if self._sorted_cache is None:
+            self._sorted_cache = sorted(self._events, key=lambda e: (
+                self._event_timestamp(e), str(getattr(e, "event_id", getattr(e, "id", "")))))
+        return self._sorted_cache
 
     def add_event(self, event: Event) -> None:
         """Add a single event to the in-memory store."""
         self._events.append(event)
+        self._sorted_cache = None
 
     def add_events(self, events: Sequence[Event]) -> None:
         """Add multiple events to the in-memory store."""
         self._events.extend(events)
+        self._sorted_cache = None
 
     @staticmethod
     def _event_timestamp(event: Event) -> datetime:
@@ -123,13 +132,7 @@ class InMemoryEventStoreReader(EventStoreReader):
     ) -> AsyncIterator[Event]:
         start_tz = start.replace(tzinfo=UTC) if start.tzinfo is None else start
         end_tz = end.replace(tzinfo=UTC) if end.tzinfo is None else end
-        sorted_events = sorted(
-            self._events,
-            key=lambda e: (
-                self._event_timestamp(e),
-                str(getattr(e, "event_id", getattr(e, "id", ""))),
-            ),
-        )
+        sorted_events = self._ordered_events()
         for event in sorted_events:
             ts = self._event_timestamp(event)
             if start_tz <= ts < end_tz and self._matches_filter(
@@ -142,13 +145,7 @@ class InMemoryEventStoreReader(EventStoreReader):
         event_types: list[str] | None = None,
         symbols: list[str] | None = None,
     ) -> AsyncIterator[Event]:
-        sorted_events = sorted(
-            self._events,
-            key=lambda e: (
-                self._event_timestamp(e),
-                str(getattr(e, "event_id", getattr(e, "id", ""))),
-            ),
-        )
+        sorted_events = self._ordered_events()
         for event in sorted_events:
             if self._matches_filter(event, event_types, symbols):
                 yield event

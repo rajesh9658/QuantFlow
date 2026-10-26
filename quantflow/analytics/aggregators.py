@@ -164,7 +164,7 @@ class IncrementalAnalyticsCalculator:
         """Update rolling return variance and downside variance."""
         self.return_aggregator.update(ret)
         # Downside deviation uses deviation below current mean (per spec)
-        downside = min(ret - self.return_aggregator.mean, 0.0)
+        downside = min(ret - self.risk_free_rate / self.annualization_factor, 0.0)
         self.downside_aggregator.update(downside)
 
     def add_trade(
@@ -180,19 +180,20 @@ class IncrementalAnalyticsCalculator:
         """Compute all performance metrics from current accumulated state."""
         mean_ret = self.return_aggregator.mean
         std_ret = self.return_aggregator.stddev()
-        downside_std = self.downside_aggregator.stddev()
+        downside = self.downside_aggregator
+        downside_std = max(0.0, downside.m2 / downside.n + downside.mean**2)**0.5 if downside.n else 0.0
 
         sharpe = calculate_sharpe_ratio(
             mean_return=mean_ret,
             std_dev=std_ret,
-            risk_free_rate=self.risk_free_rate,
+            risk_free_rate=self.risk_free_rate / self.annualization_factor,
             annualization_factor=self.annualization_factor,
         )
 
         sortino = calculate_sortino_ratio(
             mean_return=mean_ret,
             downside_std_dev=downside_std,
-            risk_free_rate=self.risk_free_rate,
+            risk_free_rate=self.risk_free_rate / self.annualization_factor,
             annualization_factor=self.annualization_factor,
         )
 

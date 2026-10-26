@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+from quantflow.portfolio.ledger import AccountLedger
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -86,6 +88,7 @@ class PortfolioEngine(PortfolioManager):
         portfolio_id: str = "quantflow_main",
         clock: Clock | None = None,
         initial_cash: float | None = None,
+        ledger: AccountLedger | None = None,
     ) -> None:
         self.config = config if config is not None else ConfigManager()
         self.event_bus = event_bus
@@ -112,7 +115,9 @@ class PortfolioEngine(PortfolioManager):
             total_equity=start_cash,
             last_updated=self.clock.now(),
         )
+        self.ledger = ledger or AccountLedger(start_cash, float(self.config.get("tax.rate", 0.0)))
         self._last_prices: dict[str, float] = {}
+        self._market_marks: dict[str, float] = {}
         self._seen_fill_ids: set[str] = set()
         self._lock = asyncio.Lock()
         self._running = False
@@ -133,6 +138,10 @@ class PortfolioEngine(PortfolioManager):
 
                     port = await port_repo.get(self.portfolio_id)
                     if port is not None:
+                        if port.ledger_state is None:
+                            raise RuntimeError("Legacy portfolio has no ledger snapshot; reconcile fills before resuming")
+                        self.ledger.restore(port.ledger_state)
+                        self._seen_fill_ids = set(self.ledger.fills)
                         self.state.cash = float(port.cash)
                         self.state.realized_pnl = float(port.realized_pnl)
 
@@ -149,9 +158,8 @@ class PortfolioEngine(PortfolioManager):
                             self._last_prices[p.symbol] = p_avg
                     await self._recalculate_valuation()
             except Exception as e:
-                logger.warning(
-                    "Failed to load persisted portfolio state: %s", e
-                )
+                self._running = False
+                raise RuntimeError("Cannot safely restore persisted portfolio") from e
 
         if self.event_bus is not None:
             await self.event_bus.subscribe(FillEvent, self.handle_fill)
@@ -401,6 +409,7 @@ class PortfolioEngine(PortfolioManager):
                     total_exposure=self.state.total_exposure,
                     realized_pnl=self.state.realized_pnl,
                     unrealized_pnl=self.state.unrealized_pnl,
+                    ledger_state=self.ledger.snapshot(),
                 )
 
                 # Sync positions: delete closed ones, upsert active ones
@@ -435,7 +444,7 @@ class PortfolioEngine(PortfolioManager):
                         )
                 await session.commit()
         except Exception as e:
-            logger.error("Failed to persist portfolio state: %s", e)
+            raise RuntimeError("Portfolio persistence failed; stop processing fills") from e
 
     # ── Public Handlers & PortfolioManager API ───────────────────
 
@@ -447,9 +456,18 @@ class PortfolioEngine(PortfolioManager):
             return
         if fill_id:
             self._seen_fill_ids.add(fill_id)
-        self._update_cash(fill)
-        self._update_position(fill)
+        self._apply_accounted_fill(fill)
         self._recalculate_valuation_sync()
+
+    def _apply_accounted_fill(self, fill: FillEvent) -> None:
+        self.ledger.apply(fill)
+        self.state.cash = self.ledger.cash
+        self.state.realized_pnl = self.ledger.gross_realized_pnl - self.ledger.total_fees
+        self.state.positions = {
+            sym: PositionState(symbol=sym, quantity=pos.quantity, avg_entry_price=pos.average)
+            for sym, pos in self.ledger.positions.items() if abs(pos.quantity) > 1e-12
+        }
+        self._last_prices[fill.symbol] = self._market_marks.get(fill.symbol, fill.fill_price)
 
     async def handle_fill(self, event: FillEvent) -> None:
         """Handle incoming FillEvent with atomic state update & event publication."""
@@ -460,18 +478,20 @@ class PortfolioEngine(PortfolioManager):
                 return
             if fill_id:
                 self._seen_fill_ids.add(fill_id)
-            self._update_cash(event)
-            self._update_position(event)
+            self._apply_accounted_fill(event)
             await self._recalculate_valuation()
             await self._persist_state()
             await self._publish_update()
 
     async def update_mark_price(self, symbol: str, price: float) -> None:
         """Update mark price for a symbol and publish updated valuation."""
-        if price <= 0:
-            return
+        if not math.isfinite(price) or price <= 0:
+            raise ValueError("Mark price must be finite and positive")
         async with self._lock:
             self._last_prices[symbol] = price
+            self._market_marks[symbol] = price
+            if symbol not in self.state.positions:
+                return  # no financial state change for a flat symbol
             await self._recalculate_valuation()
             await self._persist_state()
             await self._publish_update()

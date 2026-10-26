@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
+import math
 from typing import Any
 
 from quantflow.analytics.aggregators import (
@@ -71,6 +72,8 @@ class AnalyticsEngine:
         self.equity_curve: list[tuple[datetime, float]] = []
 
         self._running: bool = False
+        self._daily_equities: dict[Any, float] = {}
+        self.exposure_history: dict[datetime, float] = {}
 
     async def start(self) -> None:
         """Start the engine and subscribe to portfolio and execution events."""
@@ -112,32 +115,47 @@ class AnalyticsEngine:
             or getattr(event, "timestamp", None)
             or self.clock.now()
         )
-        day_key = ts.date().isoformat()
+        self.exposure_history[ts] = float(getattr(payload, "total_exposure", 0.0))
+        self._record_equity(ts, equity)
+        return
 
-        # Initial equity setup
+    def _record_equity(self, ts: datetime, equity: float) -> None:
+        ts = ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts.astimezone(UTC)
+        if self.equity_curve and ts < self.equity_curve[-1][0]:
+            raise ValueError("Equity snapshots must be chronological")
+        if not math.isfinite(equity):
+            raise ValueError("Equity must be finite")
         if self.initial_equity is None:
             self.initial_equity = equity
             self.drawdown_tracker = DrawdownTracker(equity)
-            self.last_equity = equity
-            self.last_update_day = day_key
-            self.equity_curve.append((ts, equity))
-            return
-
-        # Day transition: compute daily return for previous day
-        if day_key != self.last_update_day:
-            if self.last_equity is not None and self.last_equity > 0:
-                daily_ret = (equity - self.last_equity) / self.last_equity
-                self._add_daily_return(daily_ret)
-
-            self.last_update_day = day_key
-            self.last_equity = equity
-            self.equity_curve.append((ts, equity))
-
-        # Always update drawdown
-        if self.drawdown_tracker:
-            self.drawdown_tracker.update(equity)
-
+        # A midnight sample closes the preceding UTC day. The initial point is
+        # the baseline, not an extra flat trading day.
+        initial_ts = self.equity_curve[0][0] if self.equity_curve else ts
+        day = (ts-timedelta(microseconds=1)).date() if ts != initial_ts and ts.time().isoformat() == "00:00:00" else ts.date()
+        if self.equity_curve and (ts != initial_ts or equity != self.initial_equity):
+            self._daily_equities[day] = equity
         self.last_equity = equity
+        self.last_update_day = ts.date().isoformat()
+        self.drawdown_tracker.update(equity)
+        if self.equity_curve and self.equity_curve[-1][0] == ts:
+            self.equity_curve[-1] = (ts, equity)
+        else:
+            self.equity_curve.append((ts, equity))
+
+    def finalize(self) -> None:
+        """Rebuild close-to-close daily samples, including inactive UTC days."""
+        self.return_aggregator = WelfordOnline()
+        self.downside_aggregator = WelfordOnline()
+        if not self._daily_equities or self.initial_equity is None:
+            return
+        previous = self.initial_equity
+        day, last = min(self._daily_equities), max(self._daily_equities)
+        while day <= last:
+            current = self._daily_equities.get(day, previous)
+            if previous > 0:
+                self._add_daily_return((current-previous)/previous)
+            previous = current
+            day += timedelta(days=1)
 
     async def _handle_fill(self, event: FillEvent | Any) -> None:
         """Process fill events to compute trade PnL, slippage, and latency."""
@@ -169,7 +187,10 @@ class AnalyticsEngine:
             latency = (ts_received - ts_exchange).total_seconds()
 
         # Record trade if realized PnL was recognized
-        if abs(realized_pnl) > 1e-12:
+        if metadata.get("accounted"):
+            if float(metadata.get("closed_quantity", 0.0)) > 0 and metadata.get("trade_complete", True):
+                self.trade_stats.add_trade(float(metadata["closed_trade_pnl"]), slippage, latency)
+        elif abs(realized_pnl) > 1e-12:
             self.trade_stats.add_trade(realized_pnl, slippage, latency)
 
     # ── Internal Computation ─────────────────────────────────────────
@@ -177,7 +198,7 @@ class AnalyticsEngine:
     def _add_daily_return(self, ret: float) -> None:
         """Update standard return aggregator and downside deviation aggregator."""
         self.return_aggregator.update(ret)
-        downside = min(ret - self.return_aggregator.mean, 0.0)
+        downside = min(ret - self.risk_free_rate / self.annualization_factor, 0.0)
         self.downside_aggregator.update(downside)
 
     # ── Batch Loading (for Backtests & Simulations) ──────────────────
@@ -188,26 +209,8 @@ class AnalyticsEngine:
         """Bulk-load a historical equity curve for batch/backtest calculations."""
         self.reset()
         for ts, eq in equity_curve:
-            day_key = ts.date().isoformat()
-            if self.initial_equity is None:
-                self.initial_equity = eq
-                self.drawdown_tracker = DrawdownTracker(eq)
-                self.last_equity = eq
-                self.last_update_day = day_key
-                self.equity_curve.append((ts, eq))
-                continue
-
-            if day_key != self.last_update_day:
-                if self.last_equity is not None and self.last_equity > 0:
-                    daily_ret = (eq - self.last_equity) / self.last_equity
-                    self._add_daily_return(daily_ret)
-                self.last_update_day = day_key
-                self.last_equity = eq
-                self.equity_curve.append((ts, eq))
-
-            if self.drawdown_tracker:
-                self.drawdown_tracker.update(eq)
-            self.last_equity = eq
+            self._record_equity(ts, eq)
+        self.finalize()
 
     def load_historical_trades(
         self,
@@ -229,24 +232,28 @@ class AnalyticsEngine:
         self.drawdown_tracker = None
         self.trade_stats = TradeStatsAggregator()
         self.equity_curve.clear()
+        self._daily_equities.clear()
+        self.exposure_history.clear()
 
     def get_metrics(self) -> dict[str, float]:
         """Return the full dictionary of computed performance metrics."""
+        self.finalize()
         mean_ret = self.return_aggregator.mean
         std_ret = self.return_aggregator.stddev()
-        downside_std = self.downside_aggregator.stddev()
+        downside = self.downside_aggregator
+        downside_std = math.sqrt(max(0.0, downside.m2 / downside.n + downside.mean**2)) if downside.n else 0.0
 
         sharpe = calculate_sharpe_ratio(
             mean_return=mean_ret,
             std_dev=std_ret,
-            risk_free_rate=self.risk_free_rate,
+            risk_free_rate=self.risk_free_rate / self.annualization_factor,
             annualization_factor=self.annualization_factor,
         )
 
         sortino = calculate_sortino_ratio(
             mean_return=mean_ret,
             downside_std_dev=downside_std,
-            risk_free_rate=self.risk_free_rate,
+            risk_free_rate=self.risk_free_rate / self.annualization_factor,
             annualization_factor=self.annualization_factor,
         )
 

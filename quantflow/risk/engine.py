@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import math
 import zoneinfo
 from abc import ABC, abstractmethod
 from collections import deque
@@ -19,11 +20,13 @@ from quantflow.common.events import (
     PortfolioUpdateEvent,
     RejectedSignalEvent,
     SignalEvent,
+    TickEvent,
 )
 from quantflow.config.manager import ConfigManager
 from quantflow.core.clock import Clock, SystemClock
 from quantflow.core.interfaces import EventBus, ExecutionEngine, RiskManager
 from quantflow.core.logging import get_logger
+from quantflow.portfolio.ledger import AccountLedger
 
 logger = get_logger("risk_engine")
 
@@ -337,6 +340,7 @@ class RiskEngine(RiskManager, RiskContext):
         clock_or_checks: Clock | list[RiskCheck] | None = None,
         checks: list[RiskCheck] | None = None,
         clock: Clock | None = None,
+        ledger: AccountLedger | None = None,
         execution: Any | None = None,
     ) -> None:
         self.config = config if config is not None else ConfigManager()
@@ -364,6 +368,7 @@ class RiskEngine(RiskManager, RiskContext):
             checks = clock_or_checks
 
         self.clock: Clock = clock or SystemClock()
+        self.ledger = ledger
 
         # State
         self.positions: dict[str, float] = {}
@@ -492,7 +497,29 @@ class RiskEngine(RiskManager, RiskContext):
 
     async def validate_signal(self, signal: SignalEvent) -> tuple[bool, str | None]:
         """Run all configured checks in sequence."""
+        if signal.side not in {"BUY", "SELL"} or not math.isfinite(signal.quantity) or signal.quantity <= 0:
+            return False, "INVALID_SIGNAL"
+        if self.ledger is not None:
+            price = signal.price or await self.get_market_price(signal.symbol)
+            if price is None or not math.isfinite(price) or price <= 0:
+                return False, "MISSING_MARKET_PRICE"
+            if signal.side == "BUY":
+                from quantflow.execution.fill_simulator import FeeSchedule
+                fees = FeeSchedule.from_config(self.config, signal.symbol)
+                cost = signal.quantity * price
+                if cost + fees.calculate_fee(cost) > self.ledger.available_cash + 1e-9:
+                    return False, "INSUFFICIENT_CASH"
+            else:
+                pos = self.ledger.positions.get(signal.symbol)
+                if signal.quantity > (pos.quantity if pos else 0.0) + 1e-12:
+                    return False, "INSUFFICIENT_INVENTORY"
         for check in self.checks:
+            # A loss/exposure limit blocks new risk, but must not trap existing
+            # spot holdings by preventing a sale that reduces the position.
+            if (self.ledger is not None and signal.side == "SELL"
+                    and isinstance(check, (PositionSizeLimitCheck, MaxExposureCheck,
+                                           DailyLossLimitCheck, CircuitBreakerCheck, GlobalHaltCheck))):
+                continue
             try:
                 passed, reason = await check.validate(signal, self)
                 if not passed:
@@ -530,6 +557,7 @@ class RiskEngine(RiskManager, RiskContext):
         await self.event_bus.subscribe(SignalEvent, self._handle_signal)
         await self.event_bus.subscribe(FillEvent, self._handle_fill)
         await self.event_bus.subscribe(PortfolioUpdateEvent, self._handle_portfolio)
+        await self.event_bus.subscribe(TickEvent, self._handle_tick)
         logger.info("Risk Engine started")
 
     async def stop(self) -> None:
@@ -539,6 +567,7 @@ class RiskEngine(RiskManager, RiskContext):
         await self.event_bus.unsubscribe(SignalEvent, self._handle_signal)
         await self.event_bus.unsubscribe(FillEvent, self._handle_fill)
         await self.event_bus.unsubscribe(PortfolioUpdateEvent, self._handle_portfolio)
+        await self.event_bus.unsubscribe(TickEvent, self._handle_tick)
         logger.info("Risk Engine stopped")
 
     async def _handle_signal(self, event: SignalEvent) -> None:
@@ -557,6 +586,8 @@ class RiskEngine(RiskManager, RiskContext):
                 quantity=event.quantity,
                 signal_strength=event.signal_strength,
                 price=event.price,
+                order_type=event.order_type,
+                timestamp=self.clock.now(),
             )
             if self.event_bus:
                 await self.event_bus.publish(app_event)
@@ -568,6 +599,7 @@ class RiskEngine(RiskManager, RiskContext):
                 symbol=event.symbol,
                 exchange_id=exchange_id,
                 reason=reason or "RISK_CHECK_FAILED",
+                timestamp=self.clock.now(),
             )
             if self.event_bus:
                 await self.event_bus.publish(rej_event)
@@ -579,11 +611,14 @@ class RiskEngine(RiskManager, RiskContext):
             )
 
     async def _handle_fill(self, event: FillEvent) -> None:
-        side = event.side.upper()
-        delta = event.quantity if side == "BUY" else -event.quantity
-        self.positions[event.symbol] = self.positions.get(event.symbol, 0.0) + delta
-        if abs(self.positions[event.symbol]) < 1e-10:
-            self.positions.pop(event.symbol, None)
+        if self.ledger is not None:
+            self.positions = {s: p.quantity for s, p in self.ledger.positions.items() if abs(p.quantity) > 1e-12}
+        else:
+            side = event.side.upper()
+            delta = event.quantity if side == "BUY" else -event.quantity
+            self.positions[event.symbol] = self.positions.get(event.symbol, 0.0) + delta
+            if abs(self.positions[event.symbol]) < 1e-10:
+                self.positions.pop(event.symbol, None)
 
         if event.realized_pnl != 0.0:
             today = self.clock.now().date().isoformat()
@@ -591,7 +626,13 @@ class RiskEngine(RiskManager, RiskContext):
                 self.daily_realized_pnl = 0.0
                 self.current_day = today
             self.daily_realized_pnl += event.realized_pnl
+        if float(event.metadata.get("closed_quantity", 0.0)) > 0 and event.metadata.get("trade_complete", True):
+            self.trade_pnl_history.append(float(event.metadata["closed_trade_pnl"]))
+        elif not event.metadata.get("accounted") and event.realized_pnl != 0:
             self.trade_pnl_history.append(event.realized_pnl)
+
+    async def _handle_tick(self, event: TickEvent) -> None:
+        self.market_prices[event.symbol] = event.last_price
 
     async def _handle_portfolio(self, event: PortfolioUpdateEvent) -> None:
         self.cash = event.cash

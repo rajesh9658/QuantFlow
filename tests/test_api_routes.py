@@ -7,12 +7,14 @@ from fastapi.testclient import TestClient
 
 from quantflow.api.app import app
 from quantflow.api.dependencies import APIState, set_api_state
+from quantflow.config.manager import ConfigManager
 
 
 @pytest.fixture(autouse=True)
 def reset_api_state() -> None:
     """Ensure clean APIState before each test."""
-    set_api_state(APIState())
+    # Fixture contract checks opt into demo data explicitly.
+    set_api_state(APIState(ConfigManager(defaults={"demo": {"enabled": True}}, env_dict={})))
 
 
 @pytest.fixture

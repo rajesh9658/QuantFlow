@@ -1,0 +1,152 @@
+{
+  "unaffordable_backtest": {
+    "success": true,
+    "signals": 2,
+    "fills": [
+      {
+        "fill_id": "8392b329-5516-4f5e-b40a-5a4c072b501c_fill_0",
+        "order_id": "8392b329-5516-4f5e-b40a-5a4c072b501c",
+        "symbol": "BTC/USDT",
+        "side": "BUY",
+        "price": 50801.0,
+        "quantity": 1.0,
+        "commission": 50.801,
+        "realized_pnl": 0.0,
+        "timestamp": null
+      },
+      {
+        "fill_id": "d43d8f9a-caca-4141-8042-08b796c61f94_fill_0",
+        "order_id": "d43d8f9a-caca-4141-8042-08b796c61f94",
+        "symbol": "BTC/USDT",
+        "side": "SELL",
+        "price": 49799.0,
+        "quantity": 1.0,
+        "commission": 49.799,
+        "realized_pnl": -1002.0,
+        "timestamp": null
+      }
+    ],
+    "rejected": [],
+    "metrics": {
+      "sharpe_ratio": 0.0,
+      "sortino_ratio": 0.0,
+      "max_drawdown": 7.090459449793827,
+      "current_drawdown": 7.090459449793827,
+      "win_rate": 0.0,
+      "profit_factor": 0.0,
+      "avg_trade": -1002.0,
+      "avg_slippage": 0.0,
+      "avg_latency": 0.0,
+      "total_trades": 1.0,
+      "total_return": -7.090459449793827
+    },
+    "equity_curve": [
+      [
+        "2026-01-01 00:00:05+00:00",
+        148.19900000000052
+      ]
+    ]
+  },
+  "cash_and_risk": {
+    "snapshots": [
+      {
+        "cash": -50651.801,
+        "equity": 148.19900000000052
+      },
+      {
+        "cash": -902.5999999999985,
+        "equity": -902.5999999999985
+      }
+    ],
+    "final_equity": -902.5999999999985,
+    "portfolio_realized_pnl": -1002.0,
+    "risk_daily_pnl": 0.0,
+    "risk_positions": {},
+    "portfolio_positions": {}
+  },
+  "stale_valuation": {
+    "equity_before_explicit_mark": 148.19900000000052,
+    "equity_after_explicit_mark": 1348.1990000000005
+  },
+  "subscriber_failure": "publish returned normally despite handler RuntimeError",
+  "publish_50_slow_False_seconds": 0.0019634999334812164,
+  "publish_50_slow_True_seconds": 1.1847701999358833,
+  "daily_return": {
+    "expected": 0.1,
+    "observed_mean": 0.0
+  },
+  "replay_benchmark": {
+    "input_ticks": 10000,
+    "wall_seconds": 0.8425630999263376,
+    "ticks_per_second": 11868.547294409482,
+    "reported_event_count": 0,
+    "success": true
+  },
+  "startup": {
+    "health_status": 200,
+    "health_body": {
+      "status": "ok",
+      "version": "0.1.0",
+      "started_at": "2026-10-26T17:13:18.516297+00:00"
+    },
+    "analytics_running": false,
+    "strategy_engine_running": false,
+    "strategy_count": 0,
+    "exchanges_reported": [
+      {
+        "id": "binance",
+        "name": "Binance Spot/Futures",
+        "type": "crypto",
+        "enabled": true,
+        "connected": true,
+        "latency_ms": 42.0,
+        "last_heartbeat": "2026-10-26T17:13:18.608650+00:00",
+        "symbols_subscribed": [
+          "BTC/USDT",
+          "ETH/USDT"
+        ]
+      },
+      {
+        "id": "bybit",
+        "name": "Bybit Perpetual",
+        "type": "crypto",
+        "enabled": true,
+        "connected": true,
+        "latency_ms": 55.0,
+        "last_heartbeat": "2026-10-26T17:13:18.608657+00:00",
+        "symbols_subscribed": [
+          "BTC/USDT",
+          "ETH/USDT"
+        ]
+      }
+    ],
+    "nonexistent_strategy_job": {
+      "job_id": "job-5d2b861f",
+      "status": "completed",
+      "progress": 1.0,
+      "run_id": "run-2e486a97",
+      "error": null
+    },
+    "nonexistent_strategy_result": {
+      "id": "run-2e486a97",
+      "strategy_name": "AUDIT_NONEXISTENT_STRATEGY",
+      "start_date": "2024-01-01",
+      "end_date": "2024-06-01",
+      "status": "completed",
+      "created_at": "2026-10-26T17:13:19.179218+00:00",
+      "sharpe": 1.72,
+      "win_rate": 0.58,
+      "total_return": 0.22,
+      "max_drawdown": 0.11,
+      "params": {},
+      "metrics": {
+        "sharpe": 1.72,
+        "sortino": 2.1,
+        "profit_factor": 1.9,
+        "trades": 88
+      },
+      "equity_curve": [],
+      "trades": []
+    }
+  }
+}

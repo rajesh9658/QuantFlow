@@ -36,38 +36,16 @@ class BatchAnalyticsCalculator:
         This method replicates day-boundary daily return accumulation to ensure
         100% numerical match with live streaming event processing.
         """
-        calc = IncrementalAnalyticsCalculator(
-            risk_free_rate=self.risk_free_rate,
-            annualization_factor=self.annualization_factor,
-        )
-
-        last_update_day: str | None = None
-        last_day_equity: float | None = None
-
-        for ts, eq in equity_curve:
-            day_key = ts.date().isoformat()
-
-            if calc.initial_equity is None:
-                calc.update_equity(eq)
-                last_day_equity = eq
-                last_update_day = day_key
-                continue
-
-            if day_key != last_update_day:
-                if last_day_equity is not None and last_day_equity > 0:
-                    ret = daily_return(eq, last_day_equity)
-                    calc.add_daily_return(ret)
-                last_update_day = day_key
-                last_day_equity = eq
-
-            calc.update_equity(eq)
-            last_day_equity = eq
-
+        from quantflow.analytics.engine import AnalyticsEngine
+        from quantflow.config.manager import ConfigManager
+        from quantflow.core.event_bus import InMemoryEventBus
+        engine = AnalyticsEngine(ConfigManager(defaults={"analytics": {
+            "risk_free_rate": self.risk_free_rate, "annualization_factor": self.annualization_factor}}, env_dict={}),
+            InMemoryEventBus())
+        engine.load_historical_equity(list(equity_curve))
         if trades:
-            for pnl, slippage, latency in trades:
-                calc.add_trade(pnl, slippage, latency)
-
-        return calc.get_metrics()
+            engine.load_historical_trades(list(trades))
+        return engine.get_metrics()
 
     def compute_metrics_from_series(
         self,

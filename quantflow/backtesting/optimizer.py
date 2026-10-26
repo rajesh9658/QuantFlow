@@ -155,9 +155,8 @@ class ParameterSweepRunner:
         end: datetime,
         max_combinations: int | None = None,
     ) -> SweepResult:
-        param_sets = list(expand_grid(param_grid))
-        if max_combinations and len(param_sets) > max_combinations:
-            param_sets = param_sets[:max_combinations]
+        combinations = expand_grid(param_grid)
+        param_sets = list(itertools.islice(combinations, max_combinations)) if max_combinations else list(combinations)
 
         workers = self.max_workers
         if workers is None:

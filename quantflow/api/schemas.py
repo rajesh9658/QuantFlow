@@ -31,6 +31,9 @@ class PortfolioSnapshotResponse(BaseModel):
     realized_pnl: float
     unrealized_pnl: float
     positions: list[PositionItem] = Field(default_factory=list)
+    tax_reserve_estimate: float = 0.0
+    after_tax_equity_estimate: float | None = None
+    available_cash_after_tax_reserve: float | None = None
 
 
 class EquityCurvePoint(BaseModel):
@@ -199,7 +202,7 @@ class AnalyticsMetricsSnapshot(BaseModel):
     sharpe: float
     sortino: float
     win_rate: float
-    profit_factor: float
+    profit_factor: float | None
     avg_trade: float
     avg_slippage: float
     avg_latency: float
@@ -316,7 +319,7 @@ class BacktestRunRequest(BaseModel):
     symbol: str = "BTC/USDT"
     start_date: str = "2024-01-01"
     end_date: str = "2024-06-01"
-    initial_cash: float = 100000.0
+    initial_cash: float = Field(default=200.0, gt=0, allow_inf_nan=False)
     parameters: dict[str, Any] = Field(default_factory=dict)
 
 

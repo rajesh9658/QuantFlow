@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from datetime import UTC, datetime
 from typing import Any
 
@@ -20,6 +21,10 @@ class FeeSchedule:
     taker_rate: float = 0.001
     maker_rate: float = 0.0005
     flat_fee_per_order: float = 0.0
+
+    def __post_init__(self) -> None:
+        if any(not math.isfinite(v) or v < 0 for v in (self.taker_rate, self.maker_rate, self.flat_fee_per_order)):
+            raise ValueError("Fee rates and flat fees must be finite and nonnegative")
 
     def calculate_fee(self, notional: float, is_maker: bool = False) -> float:
         """Calculate total fee for a given trade notional."""
@@ -213,7 +218,9 @@ def simulate_fill(
             continue
 
         cost = fill_qty * level_price
-        commission = fee_schedule.calculate_fee(cost, is_maker=False)
+        commission = cost * fee_schedule.taker_rate
+        if not fills:
+            commission += fee_schedule.flat_fee_per_order
 
         fill_event = FillEvent(
             fill_id=f"{order_id}_fill_{idx}",
@@ -225,6 +232,9 @@ def simulate_fill(
             commission=commission,
             exchange="paper",
             timestamp=ts,
+            timestamp_exchange=ts,
+            metadata={"strategy_id": getattr(order, "strategy_id", ""),
+                      "order_exchange_id": getattr(order, "exchange_id", "paper")},
         )
         fills.append(fill_event)
 

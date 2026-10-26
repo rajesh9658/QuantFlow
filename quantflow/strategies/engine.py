@@ -56,6 +56,9 @@ class StrategyEngine:
             return
         self._running = False
         await self._bus.unsubscribe(MarketDataEvent, self._dispatch)
+        for strat in self._strategies.values():
+            if hasattr(strat, "stop"):
+                await strat.stop()
         logger.info("strategy engine stopped")
 
     # ── dispatch ─────────────────────────────────────────────────

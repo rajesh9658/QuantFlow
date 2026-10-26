@@ -573,7 +573,7 @@ async def test_portfolio_engine_db_persistence_and_recovery(
         saved_port = await port_repo.get("quantflow_main")
         assert saved_port is not None
         assert saved_port.cash == 104980.0
-        assert saved_port.realized_pnl == 5000.0
+        assert saved_port.realized_pnl == 4980.0
 
         db_positions = await pos_repo.get_all("quantflow_main")
         assert len(db_positions) == 0

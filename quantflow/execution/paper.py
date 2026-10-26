@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -11,6 +12,7 @@ from quantflow.common.events import (
     ApprovedSignalEvent,
     FillEvent,
     OrderEvent,
+    RejectedSignalEvent,
 )
 from quantflow.config.manager import ConfigManager
 from quantflow.core.clock import Clock, SystemClock
@@ -24,6 +26,7 @@ from quantflow.execution.fill_simulator import (
     simulate_fill,
 )
 from quantflow.market_data.orderbook import LocalOrderBook
+from quantflow.portfolio.ledger import AccountLedger
 
 logger = get_logger("paper_execution")
 
@@ -43,6 +46,7 @@ class PaperExecutionHandler(ExecutionEngine):
         session_factory: async_sessionmaker[AsyncSession] | None = None,
         registry: Any | None = None,
         symbol_mapper: Any | None = None,
+        ledger: AccountLedger | None = None,
     ) -> None:
         self.config = config if config is not None else ConfigManager()
         self.event_bus = event_bus
@@ -66,6 +70,10 @@ class PaperExecutionHandler(ExecutionEngine):
         self.session_factory = session_factory
         self.registry = registry
         self.symbol_mapper = symbol_mapper
+        self.ledger = ledger or AccountLedger(
+            float(self.config.get("portfolio.initial_cash", 100000.0)),
+            float(self.config.get("tax.rate", 0.0)),
+        )
 
         self._pending_orders: dict[str, OrderEvent] = {}
         self._order_statuses: dict[str, str] = {}
@@ -103,17 +111,12 @@ class PaperExecutionHandler(ExecutionEngine):
 
     async def submit_order(self, order: OrderEvent) -> None:
         """Execute an order against the current local orderbook snapshot."""
-        if self.registry:
-            adapter = self.registry.get(order.exchange_id)
-            if hasattr(adapter, "place_order"):
-                try:
-                    await adapter.place_order(order)
-                except NotImplementedError:
-                    pass
-                except Exception as e:
-                    logger.debug("Adapter order placement note: %s", e)
-
         async with self._lock:
+            if order.order_id in self._order_statuses:
+                return  # An order ID is idempotent, including partial fills.
+            if (order.side not in {"BUY", "SELL"} or order.order_type not in {"MARKET", "LIMIT"}
+                    or not math.isfinite(order.quantity) or order.quantity <= 0):
+                raise ValueError("Invalid paper order")
             book = self.order_books.get(order.symbol)
             if not book:
                 logger.error("No order book available for %s", order.symbol)
@@ -129,6 +132,16 @@ class PaperExecutionHandler(ExecutionEngine):
                 fee_schedule=fee_schedule,
                 timestamp=now_ts,
             )
+
+            # Enforce a cash spot account even for directly submitted orders.
+            held = self.ledger.positions.get(order.symbol)
+            inventory = held.quantity if held else 0.0
+            if ((order.side == "BUY" and result.total_cost + result.total_commission > self.ledger.available_cash + 1e-9)
+                    or (order.side == "SELL" and order.quantity > inventory + 1e-12)):
+                self._order_statuses[order.order_id] = "REJECTED"
+                logger.warning("Rejected paper order %s: insufficient cash or inventory", order.order_id)
+                return
+            result.fills = self.ledger.apply_order(result.fills)
 
             # Determine order status
             if result.remaining_quantity <= 1e-12:
@@ -264,7 +277,7 @@ class PaperExecutionHandler(ExecutionEngine):
 
     async def _handle_approved_signal(self, event: ApprovedSignalEvent) -> None:
         """Convert approved strategy signal into an OrderEvent and submit."""
-        order_type = "LIMIT" if event.price and event.price > 0 else "MARKET"
+        order_type = event.order_type
         order = OrderEvent(
             strategy_id=event.strategy_id,
             symbol=event.symbol,
@@ -275,6 +288,11 @@ class PaperExecutionHandler(ExecutionEngine):
             price=event.price,
         )
         await self.submit_order(order)
+        if self.get_order_status(order.order_id) == "REJECTED" and self.event_bus:
+            await self.event_bus.publish(RejectedSignalEvent(
+                signal_id=event.signal_id, strategy_id=event.strategy_id,
+                symbol=event.symbol, exchange_id=event.exchange_id,
+                reason="EXECUTION_REJECTED", timestamp=self.clock.now()))
 
     async def _handle_order_event(self, event: OrderEvent) -> None:
         """Process directly received OrderEvent."""

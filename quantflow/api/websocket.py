@@ -40,6 +40,17 @@ class DashboardConnection:
         self.token = token
         self.subscribed_symbols: set[str] = set()
         self.connected_at = datetime.now(UTC)
+        self.outbound: asyncio.Queue[tuple[str, Any]] = asyncio.Queue(maxsize=256)
+        self.writer: asyncio.Task[None] | None = None
+
+    async def write_events(self) -> None:
+        try:
+            while True:
+                name, data = await self.outbound.get()
+                await asyncio.wait_for(self.send_event(name, data), timeout=1.0)
+        except Exception:
+            logger.warning("Disconnecting slow or failed dashboard client %s", self.session_id)
+            await self.websocket.close(code=1013)
 
     async def send_event(self, event_name: str, data: Any) -> None:
         """Send a standardized JSON envelope to the client."""
@@ -60,6 +71,7 @@ class DashboardWebSocketManager:
         self._event_bus_subscribed = False
         self._last_ticker_broadcast: dict[str, float] = {}
         self._ticker_throttle_ms: float = 250.0
+        self._event_bus: Any = None
 
     async def connect(
         self, websocket: WebSocket, token: str | None = None
@@ -83,12 +95,16 @@ class DashboardWebSocketManager:
             },
         )
         logger.info(f"Dashboard client connected: {session_id}")
+        connection.writer = asyncio.create_task(connection.write_events())
         return connection
 
     async def disconnect(self, session_id: str) -> None:
         """Unregister a disconnected client."""
         async with self._lock:
-            self.active_connections.pop(session_id, None)
+            conn = self.active_connections.pop(session_id, None)
+        if conn and conn.writer:
+            conn.writer.cancel()
+            await asyncio.gather(conn.writer, return_exceptions=True)
         logger.info(f"Dashboard client disconnected: {session_id}")
 
     async def broadcast(
@@ -105,9 +121,14 @@ class DashboardWebSocketManager:
             if symbol_filter and symbol_filter not in conn.subscribed_symbols:
                 continue
             try:
-                await conn.send_event(event_name, data)
-            except Exception as e:
-                logger.warning(f"Error sending event to {conn.session_id}: {e}")
+                conn.outbound.put_nowait((event_name, data))
+            except asyncio.QueueFull:
+                # Never block financial events on a dashboard client. Closing
+                # the connection prompts a fresh snapshot on reconnect.
+                if conn.writer:
+                    conn.writer.cancel()
+                asyncio.create_task(conn.websocket.close(code=1013))
+                self.active_connections.pop(conn.session_id, None)
 
     # ── EventBus Bridge Handlers ──────────────────────────────────────
 
@@ -232,8 +253,10 @@ class DashboardWebSocketManager:
 
     async def subscribe_to_event_bus(self, event_bus: Any) -> None:
         """Attach WS manager handlers to EventBus."""
-        if self._event_bus_subscribed:
+        if self._event_bus is event_bus:
             return
+        await self.unsubscribe_from_event_bus()
+        self._event_bus = event_bus
         self._event_bus_subscribed = True
         try:
             await event_bus.subscribe(PortfolioUpdateEvent, self.handle_portfolio_event)
@@ -245,6 +268,17 @@ class DashboardWebSocketManager:
             logger.info("DashboardWebSocketManager subscribed to EventBus")
         except Exception as e:
             logger.error(f"Failed subscribing to event bus: {e}")
+
+    async def unsubscribe_from_event_bus(self) -> None:
+        if self._event_bus is not None:
+            for event, handler in [(PortfolioUpdateEvent, self.handle_portfolio_event),
+                    (FillEvent, self.handle_fill_event), (SignalEvent, self.handle_signal_event),
+                    (RiskEvent, self.handle_risk_event), (SystemEvent, self.handle_system_event),
+                    (TickEvent, self.handle_tick_event)]:
+                await self._event_bus.unsubscribe(event, handler)
+        self._event_bus = None
+        self._event_bus_subscribed = False
+        self._last_ticker_broadcast.clear()
 
 
 # Global manager singleton
