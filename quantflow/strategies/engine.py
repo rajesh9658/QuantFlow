@@ -47,9 +47,7 @@ class StrategyEngine:
             if hasattr(strat, "initialize"):
                 await strat.initialize(clock=self.clock)
         await self._bus.subscribe(MarketDataEvent, self._dispatch)
-        logger.info(
-            "strategy engine started with %d strategies", len(self._strategies)
-        )
+        logger.info("strategy engine started with %d strategies", len(self._strategies))
 
     async def stop(self) -> None:
         if not self._running:
@@ -70,6 +68,4 @@ class StrategyEngine:
             try:
                 await strat.on_event(event)
             except Exception:
-                logger.exception(
-                    "strategy %s failed on event %s", name, event.event_id
-                )
+                logger.exception("strategy %s failed on event %s", name, event.event_id)

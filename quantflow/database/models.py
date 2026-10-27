@@ -79,9 +79,7 @@ class Ticker(Base):
 
     __tablename__ = "tickers"
 
-    id: Mapped[int] = mapped_column(
-        BigIntId, primary_key=True, autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(String, nullable=False, index=True)
     bid: Mapped[float] = mapped_column(DECIMAL(20, 10), nullable=False)
     ask: Mapped[float] = mapped_column(DECIMAL(20, 10), nullable=False)
@@ -115,15 +113,11 @@ class OrderBook(Base):
 
     __tablename__ = "orderbooks"
 
-    id: Mapped[int] = mapped_column(
-        BigIntId, primary_key=True, autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(String, nullable=False, index=True)
     bids: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
     asks: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
-    last_update_id: Mapped[int | None] = mapped_column(
-        BigInteger, nullable=True
-    )
+    last_update_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     timestamp_exchange: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -152,9 +146,7 @@ class Log(Base):
 
     __tablename__ = "logs"
 
-    id: Mapped[int] = mapped_column(
-        BigIntId, primary_key=True, autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)
     correlation_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, index=True, nullable=True
     )
@@ -183,12 +175,8 @@ class ErrorLog(Base):
 
     __tablename__ = "errors"
 
-    id: Mapped[int] = mapped_column(
-        BigIntId, primary_key=True, autoincrement=True
-    )
-    correlation_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, nullable=True
-    )
+    id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)
+    correlation_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String, nullable=True)
     error_message: Mapped[str] = mapped_column(Text, nullable=False)
     stack_trace: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -210,9 +198,7 @@ class Strategy(Base):
 
     __tablename__ = "strategies"
 
-    id: Mapped[int] = mapped_column(
-        BigIntId, primary_key=True, autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     version: Mapped[str] = mapped_column(String, nullable=False)
     config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -235,12 +221,8 @@ class Signal(Base):
 
     __tablename__ = "signals"
 
-    id: Mapped[int] = mapped_column(
-        BigIntId, primary_key=True, autoincrement=True
-    )
-    event_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, unique=True, nullable=False
-    )
+    id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)
+    event_id: Mapped[uuid.UUID] = mapped_column(Uuid, unique=True, nullable=False)
     strategy_name: Mapped[str] = mapped_column(
         String, ForeignKey("strategies.name"), nullable=False
     )
@@ -280,15 +262,9 @@ class Order(Base):
 
     __tablename__ = "orders"
 
-    id: Mapped[int] = mapped_column(
-        BigIntId, primary_key=True, autoincrement=True
-    )
-    order_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, unique=True, nullable=False
-    )
-    exchange_order_id: Mapped[str | None] = mapped_column(
-        String, nullable=True
-    )
+    id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)
+    order_id: Mapped[uuid.UUID] = mapped_column(Uuid, unique=True, nullable=False)
+    exchange_order_id: Mapped[str | None] = mapped_column(String, nullable=True)
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     side: Mapped[OrderSide] = mapped_column(
         Enum(OrderSide, name="order_side", native_enum=False), nullable=False
@@ -297,18 +273,10 @@ class Order(Base):
         Enum(OrderType, name="order_type", native_enum=False), nullable=False
     )
     quantity: Mapped[float] = mapped_column(DECIMAL(20, 10), nullable=False)
-    filled_quantity: Mapped[float] = mapped_column(
-        DECIMAL(20, 10), default=0.0
-    )
-    avg_price: Mapped[float | None] = mapped_column(
-        DECIMAL(20, 10), nullable=True
-    )
-    limit_price: Mapped[float | None] = mapped_column(
-        DECIMAL(20, 10), nullable=True
-    )
-    stop_price: Mapped[float | None] = mapped_column(
-        DECIMAL(20, 10), nullable=True
-    )
+    filled_quantity: Mapped[float] = mapped_column(DECIMAL(20, 10), default=0.0)
+    avg_price: Mapped[float | None] = mapped_column(DECIMAL(20, 10), nullable=True)
+    limit_price: Mapped[float | None] = mapped_column(DECIMAL(20, 10), nullable=True)
+    stop_price: Mapped[float | None] = mapped_column(DECIMAL(20, 10), nullable=True)
     time_in_force: Mapped[str] = mapped_column(String, default="GTC")
     status: Mapped[OrderStatus] = mapped_column(
         Enum(OrderStatus, name="order_status", native_enum=False),
@@ -346,12 +314,8 @@ class Execution(Base):
 
     __tablename__ = "executions"
 
-    id: Mapped[int] = mapped_column(
-        BigIntId, primary_key=True, autoincrement=True
-    )
-    fill_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, unique=True, nullable=False
-    )
+    id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)
+    fill_id: Mapped[uuid.UUID] = mapped_column(Uuid, unique=True, nullable=False)
     order_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("orders.order_id", ondelete="CASCADE"), nullable=False
     )
@@ -392,23 +356,13 @@ class Position(Base):
 
     __tablename__ = "positions"
 
-    id: Mapped[int] = mapped_column(
-        BigIntId, primary_key=True, autoincrement=True
-    )
-    portfolio_id: Mapped[str] = mapped_column(
-        String, default="quantflow_main"
-    )
+    id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)
+    portfolio_id: Mapped[str] = mapped_column(String, default="quantflow_main")
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     quantity: Mapped[float] = mapped_column(DECIMAL(20, 10), nullable=False)
-    avg_entry_price: Mapped[float] = mapped_column(
-        DECIMAL(20, 10), nullable=False
-    )
-    unrealized_pnl: Mapped[float | None] = mapped_column(
-        DECIMAL(20, 10), nullable=True
-    )
-    realized_pnl: Mapped[float | None] = mapped_column(
-        DECIMAL(20, 10), nullable=True
-    )
+    avg_entry_price: Mapped[float] = mapped_column(DECIMAL(20, 10), nullable=False)
+    unrealized_pnl: Mapped[float | None] = mapped_column(DECIMAL(20, 10), nullable=True)
+    realized_pnl: Mapped[float | None] = mapped_column(DECIMAL(20, 10), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
@@ -426,19 +380,13 @@ class Portfolio(Base):
 
     __tablename__ = "portfolio"
 
-    id: Mapped[int] = mapped_column(
-        BigIntId, primary_key=True, autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)
     portfolio_id: Mapped[str] = mapped_column(
         String, unique=True, default="quantflow_main"
     )
     cash: Mapped[float] = mapped_column(DECIMAL(20, 10), nullable=False)
-    total_equity: Mapped[float] = mapped_column(
-        DECIMAL(20, 10), nullable=False
-    )
-    total_exposure: Mapped[float] = mapped_column(
-        DECIMAL(20, 10), nullable=False
-    )
+    total_equity: Mapped[float] = mapped_column(DECIMAL(20, 10), nullable=False)
+    total_exposure: Mapped[float] = mapped_column(DECIMAL(20, 10), nullable=False)
     realized_pnl: Mapped[float] = mapped_column(DECIMAL(20, 10), default=0.0)
     ledger_state: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     unrealized_pnl: Mapped[float] = mapped_column(DECIMAL(20, 10), default=0.0)
@@ -456,19 +404,11 @@ class Metric(Base):
 
     __tablename__ = "metrics"
 
-    id: Mapped[int] = mapped_column(
-        BigIntId, primary_key=True, autoincrement=True
-    )
-    portfolio_id: Mapped[str] = mapped_column(
-        String, default="quantflow_main"
-    )
+    id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)
+    portfolio_id: Mapped[str] = mapped_column(String, default="quantflow_main")
     metric_name: Mapped[str] = mapped_column(String, nullable=False)
-    metric_value: Mapped[float] = mapped_column(
-        DECIMAL(20, 6), nullable=False
-    )
-    timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    metric_value: Mapped[float] = mapped_column(DECIMAL(20, 6), nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSON, default=dict
     )
@@ -488,21 +428,15 @@ class PartitionMetadata(Base):
 
     __tablename__ = "partition_metadata"
 
-    id: Mapped[int] = mapped_column(
-        BigIntId, primary_key=True, autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)
     table_name: Mapped[str] = mapped_column(String, nullable=False)
     partition_name: Mapped[str] = mapped_column(String, nullable=False)
     start_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    end_date: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
 
-    __table_args__ = (
-        UniqueConstraint("table_name", "partition_name"),
-    )
+    __table_args__ = (UniqueConstraint("table_name", "partition_name"),)

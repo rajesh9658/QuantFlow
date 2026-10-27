@@ -7,8 +7,11 @@ import inspect
 import math
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from uuid import uuid4
+
+from fastapi import Depends, HTTPException, Security, status
+from fastapi.security import APIKeyHeader
 
 from quantflow.analytics.engine import AnalyticsEngine
 from quantflow.config.manager import ConfigManager
@@ -51,7 +54,11 @@ class APIState:
         self._strategy_configs: dict[str, dict[str, Any]] = {
             "Simple Momentum": {"period": 20, "threshold": 0.02, "timeframe": "1m"},
             "Mean Reversion": {"window": 30, "std_dev": 2.0, "timeframe": "5m"},
-            "Trend Follower": {"fast_period": 10, "slow_period": 50, "timeframe": "15m"},
+            "Trend Follower": {
+                "fast_period": 10,
+                "slow_period": 50,
+                "timeframe": "15m",
+            },
         }
         self._risk_config: dict[str, Any] = {
             "max_position_qty": 5.0,
@@ -129,10 +136,15 @@ class APIState:
             self._exchanges.clear()
             self._exchange_status.clear()
             self._strategy_toggles = {
-                name: True for name in (self.strategy_engine._strategies if self.strategy_engine else {})
+                name: True
+                for name in (
+                    self.strategy_engine._strategies if self.strategy_engine else {}
+                )
             }
-            self._strategy_configs = {name: dict(self.config.get("strategies.SimpleMomentum", {}))
-                                      for name in self._strategy_toggles}
+            self._strategy_configs = {
+                name: dict(self.config.get("strategies.SimpleMomentum", {}))
+                for name in self._strategy_toggles
+            }
             self._risk_config = self.get_risk_config()
 
     def _seed_fixtures(self) -> None:
@@ -210,8 +222,14 @@ class APIState:
     def get_portfolio_snapshot(self) -> dict[str, Any]:
         if not self.demo_mode and self.portfolio_engine is None:
             cash = float(self.config.get("portfolio.initial_cash", 200.0))
-            return {"cash": cash, "total_equity": cash, "total_exposure": 0.0,
-                "realized_pnl": 0.0, "unrealized_pnl": 0.0, "positions": []}
+            return {
+                "cash": cash,
+                "total_equity": cash,
+                "total_exposure": 0.0,
+                "realized_pnl": 0.0,
+                "unrealized_pnl": 0.0,
+                "positions": [],
+            }
         if self.portfolio_engine is not None:
             st = self.portfolio_engine.state
             positions = [
@@ -232,7 +250,8 @@ class APIState:
                 "unrealized_pnl": st.unrealized_pnl,
                 "positions": positions,
                 "tax_reserve_estimate": self.portfolio_engine.ledger.tax_reserve,
-                "after_tax_equity_estimate": st.total_equity-self.portfolio_engine.ledger.tax_reserve,
+                "after_tax_equity_estimate": st.total_equity
+                - self.portfolio_engine.ledger.tax_reserve,
                 "available_cash_after_tax_reserve": self.portfolio_engine.ledger.available_cash,
             }
 
@@ -274,15 +293,15 @@ class APIState:
                     if eq > peak:
                         peak = eq
                     dd = (peak - eq) / peak if peak > 0 else 0.0
-                    ts_val = (
-                        ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
-                    )
+                    ts_val = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
                     res.append(
                         {
                             "timestamp": ts_val,
                             "equity": eq,
                             "drawdown": dd,
-                            "exposure": self.analytics_engine.exposure_history.get(ts, 0.0),
+                            "exposure": self.analytics_engine.exposure_history.get(
+                                ts, 0.0
+                            ),
                         }
                     )
                 return res
@@ -296,7 +315,7 @@ class APIState:
         peak = base_eq
         for i in range(10):
             day = now - timedelta(days=10 - i)
-            base_eq += (-500.0 if i == 3 else (1000.0 if i % 2 == 0 else 400.0))
+            base_eq += -500.0 if i == 3 else (1000.0 if i % 2 == 0 else 400.0)
             if base_eq > peak:
                 peak = base_eq
             dd = (peak - base_eq) / peak
@@ -355,9 +374,16 @@ class APIState:
 
     def get_strategies(self) -> list[dict[str, Any]]:
         if not self.demo_mode:
-            return [{"name": name, "version": "1.0.0", "active": active,
-                     "config": self.get_strategy_config(name), "metrics": {}}
-                    for name, active in self._strategy_toggles.items()]
+            return [
+                {
+                    "name": name,
+                    "version": "1.0.0",
+                    "active": active,
+                    "config": self.get_strategy_config(name),
+                    "metrics": {},
+                }
+                for name, active in self._strategy_toggles.items()
+            ]
         res = []
         for name, active in self._strategy_toggles.items():
             res.append(
@@ -377,8 +403,14 @@ class APIState:
 
     def get_strategy_metrics(self, name: str) -> dict[str, Any]:
         if not self.demo_mode:
-            return {"win_rate": 0.0, "sharpe": 0.0, "sortino": 0.0,
-                    "profit_factor": 0.0, "max_drawdown": 0.0, "equity_curve": []}
+            return {
+                "win_rate": 0.0,
+                "sharpe": 0.0,
+                "sortino": 0.0,
+                "profit_factor": 0.0,
+                "max_drawdown": 0.0,
+                "equity_curve": [],
+            }
         return {
             "win_rate": 0.65,
             "sharpe": 1.85,
@@ -397,7 +429,9 @@ class APIState:
                 "daily_loss_limit": float(
                     self.config.get("risk.max_daily_loss", 1000.0)
                 ),
-                "current_exposure": self.portfolio_engine.state.total_exposure if self.portfolio_engine else 0.0,
+                "current_exposure": self.portfolio_engine.state.total_exposure
+                if self.portfolio_engine
+                else 0.0,
                 "max_exposure": float(
                     self.config.get("risk.max_total_exposure", 100000.0)
                 ),
@@ -407,19 +441,17 @@ class APIState:
             "emergency_stop": self._emergency_stop,
             "circuit_breaker_active": False,
             "daily_pnl": -450.0 if self.demo_mode else 0.0,
-            "daily_loss_limit": float(
-                self.config.get("risk.max_daily_loss", 1000.0)
-            ),
+            "daily_loss_limit": float(self.config.get("risk.max_daily_loss", 1000.0)),
             "current_exposure": 52216.25 if self.demo_mode else 0.0,
-            "max_exposure": float(
-                self.config.get("risk.max_total_exposure", 100000.0)
-            ),
+            "max_exposure": float(self.config.get("risk.max_total_exposure", 100000.0)),
         }
 
     def get_risk_config(self) -> dict[str, Any]:
         schedule = self.config.get("risk.trading_schedule", "00:00-23:59")
         if isinstance(schedule, dict):
-            schedule = f"{schedule.get('start', '00:00')}-{schedule.get('end', '23:59')}"
+            schedule = (
+                f"{schedule.get('start', '00:00')}-{schedule.get('end', '23:59')}"
+            )
         return {
             "max_position_qty": float(self.config.get("risk.max_position_qty", 5.0)),
             "max_daily_loss": float(self.config.get("risk.max_daily_loss", 1000.0)),
@@ -449,23 +481,34 @@ class APIState:
             logs = [entry for entry in logs if entry.get("level") == level.upper()]
         if correlation_id:
             logs = [
-                entry
-                for entry in logs
-                if entry.get("correlation_id") == correlation_id
+                entry for entry in logs if entry.get("correlation_id") == correlation_id
             ]
         return logs[offset : offset + limit]
 
-    def get_analytics_metrics(self) -> dict[str, float]:
+    def get_analytics_metrics(self) -> dict[str, float | None]:
         if not self.demo_mode and self.analytics_engine is None:
-            return {name: 0.0 for name in ("sharpe", "sortino", "win_rate", "profit_factor",
-                "avg_trade", "avg_slippage", "avg_latency", "max_drawdown")}
+            return {
+                name: 0.0
+                for name in (
+                    "sharpe",
+                    "sortino",
+                    "win_rate",
+                    "profit_factor",
+                    "avg_trade",
+                    "avg_slippage",
+                    "avg_latency",
+                    "max_drawdown",
+                )
+            }
         if self.analytics_engine is not None:
             m = self.analytics_engine.get_metrics()
             return {
                 "sharpe": m.get("sharpe_ratio", 1.8),
                 "sortino": m.get("sortino_ratio", 2.2),
                 "win_rate": m.get("win_rate", 0.65),
-                "profit_factor": m.get("profit_factor", 0.0) if math.isfinite(m.get("profit_factor", 0.0)) else None,
+                "profit_factor": m.get("profit_factor", 0.0)
+                if math.isfinite(m.get("profit_factor", 0.0))
+                else None,
                 "avg_trade": m.get("avg_trade", 35.5),
                 "avg_slippage": m.get("avg_slippage", 0.25),
                 "avg_latency": m.get("avg_latency", 0.018),
@@ -482,9 +525,7 @@ class APIState:
             "max_drawdown": 0.12,
         }
 
-    async def set_emergency_stop(
-        self, enabled: bool, trigger: str = "manual"
-    ) -> str:
+    async def set_emergency_stop(self, enabled: bool, trigger: str = "manual") -> str:
         self._emergency_stop = enabled
         if self.risk_engine is not None:
             res = self.risk_engine.set_emergency_stop(enabled, trigger=trigger)
@@ -501,6 +542,8 @@ class APIState:
         return name, active
 
     def get_strategy_config(self, name: str) -> dict[str, Any]:
+        if not self.demo_mode and name not in self._strategy_configs:
+            raise ValueError("Unknown strategy")
         return self._strategy_configs.get(
             name, {"period": 20, "threshold": 0.02, "timeframe": "1m"}
         )
@@ -514,6 +557,8 @@ class APIState:
             self.strategy_engine._strategies[name].update_config(config)
         curr = self._strategy_configs.setdefault(name, {})
         curr.update(config)
+        if not self.demo_mode:
+            self.config.set("strategies.SimpleMomentum", dict(curr))
         return curr
 
     def update_risk_config(self, updates: dict[str, Any]) -> dict[str, Any]:
@@ -531,16 +576,14 @@ class APIState:
     def get_exchanges(self) -> list[dict[str, Any]]:
         return list(self._exchanges.values())
 
-    def get_exchange_status_by_id(
-        self, exchange_id: str
-    ) -> dict[str, Any] | None:
+    def get_exchange_status_by_id(self, exchange_id: str) -> dict[str, Any] | None:
         return self._exchanges.get(exchange_id)
 
-    def toggle_exchange(
-        self, exchange_id: str, enabled: bool
-    ) -> dict[str, Any]:
+    def toggle_exchange(self, exchange_id: str, enabled: bool) -> dict[str, Any]:
         if not self.demo_mode:
-            raise ValueError("Exchange connection control is unavailable in offline paper mode")
+            raise ValueError(
+                "Exchange connection control is unavailable in offline paper mode"
+            )
         if exchange_id not in self._exchanges:
             self._exchanges[exchange_id] = {
                 "id": exchange_id,
@@ -569,38 +612,59 @@ class APIState:
     def submit_backtest_job(self, data: dict[str, Any]) -> str:
         """Queue a real historical run. No market data means no result."""
         from quantflow.strategies.momentum.strategy import SimpleMomentumStrategy
+
         name = data.get("strategy_name")
         if name not in {"Simple Momentum", "SimpleMomentum"}:
             raise ValueError("Unknown strategy; supported strategy is Simple Momentum")
         data_path = self.config.get("backtest.data_path")
         if not data_path or not Path(data_path).is_file():
-            raise ValueError("Configure backtest.data_path to an existing historical quote CSV")
+            raise ValueError(
+                "Configure backtest.data_path to an existing historical quote CSV"
+            )
         start = datetime.fromisoformat(str(data["start_date"]).replace("Z", "+00:00"))
         end = datetime.fromisoformat(str(data["end_date"]).replace("Z", "+00:00"))
-        start = start.replace(tzinfo=UTC) if start.tzinfo is None else start.astimezone(UTC)
+        start = (
+            start.replace(tzinfo=UTC) if start.tzinfo is None else start.astimezone(UTC)
+        )
         end = end.replace(tzinfo=UTC) if end.tzinfo is None else end.astimezone(UTC)
         cash = float(data.get("initial_cash", 200.0))
         if end <= start or not math.isfinite(cash) or cash <= 0:
             raise ValueError("Dates must increase and initial cash must be positive")
         if len(self._backtest_tasks) >= 4:
             raise OverflowError("Backtest queue is full")
-        params = {**data.get("parameters", {}), "symbol": data.get("symbol", "BTC/USDT")}
+        params = {
+            **data.get("parameters", {}),
+            "symbol": data.get("symbol", "BTC/USDT"),
+        }
         SimpleMomentumStrategy(self.event_bus, params)  # validate before accepting
         job_id = f"job-{uuid4().hex[:8]}"
         self._backtest_jobs[job_id] = {
-            "job_id": job_id, "status": "queued", "progress": 0.0,
-            "run_id": None, "error": None,
+            "job_id": job_id,
+            "status": "queued",
+            "progress": 0.0,
+            "run_id": None,
+            "error": None,
         }
-        task = asyncio.create_task(self._execute_backtest(job_id, str(data_path), params, start, end, cash))
+        task = asyncio.create_task(
+            self._execute_backtest(job_id, str(data_path), params, start, end, cash)
+        )
         self._backtest_tasks.add(task)
         task.add_done_callback(self._backtest_tasks.discard)
         return job_id
 
-    async def _execute_backtest(self, job_id: str, path: str, params: dict[str, Any],
-                               start: datetime, end: datetime, cash: float) -> None:
+    async def _execute_backtest(
+        self,
+        job_id: str,
+        path: str,
+        params: dict[str, Any],
+        start: datetime,
+        end: datetime,
+        cash: float,
+    ) -> None:
         from quantflow.backtesting.data import read_quotes
         from quantflow.backtesting.engine import BacktestEngine
         from quantflow.strategies.momentum.strategy import SimpleMomentumStrategy
+
         job = self._backtest_jobs[job_id]
         async with self._backtest_limit:
             try:
@@ -608,30 +672,60 @@ class APIState:
                 reader = await asyncio.to_thread(read_quotes, path)
                 cfg = ConfigManager(defaults=self.config._config, env_dict={})
                 cfg.set("portfolio.initial_cash", cash)
-                result = await BacktestEngine(cfg).run(reader, SimpleMomentumStrategy, params, start, end)
+                result = await BacktestEngine(cfg).run(
+                    reader, SimpleMomentumStrategy, params, start, end
+                )
                 if not result.success:
                     raise ValueError(result.error)
                 # JSON cannot represent infinite profit factors from zero losses.
-                metrics = {k: v if math.isfinite(v) else None for k, v in result.metrics.items()}
+                metrics = {
+                    k: v if math.isfinite(v) else None
+                    for k, v in result.metrics.items()
+                }
                 run_id = f"run-{uuid4().hex[:8]}"
                 peak = result.equity_curve[0][1]
                 curve = []
                 for ts, eq in result.equity_curve:
                     peak = max(peak, eq)
-                    curve.append({"timestamp": ts.isoformat(), "equity": eq,
-                        "drawdown": (peak-eq)/peak if peak > 0 else 0,
-                        "exposure": result.exposure_history.get(ts, 0.0)})
-                self._backtest_runs.insert(0, {"id": run_id, "strategy_name": "Simple Momentum",
-                    "start_date": start.isoformat(), "end_date": end.isoformat(), "status": "completed",
-                    "created_at": datetime.now(UTC).isoformat(), "params": params, "metrics": metrics,
-                    "sharpe": metrics.get("sharpe_ratio", 0.0), "win_rate": metrics.get("win_rate", 0.0),
-                    "total_return": metrics.get("total_return", 0.0), "max_drawdown": metrics.get("max_drawdown", 0.0),
-                    "equity_curve": curve,
-                    "trades": [{**t, "side": t["side"].lower(), "timestamp_exchange": t["timestamp"].isoformat()}
-                               for t in result.trades]})
+                    curve.append(
+                        {
+                            "timestamp": ts.isoformat(),
+                            "equity": eq,
+                            "drawdown": (peak - eq) / peak if peak > 0 else 0,
+                            "exposure": result.exposure_history.get(ts, 0.0),
+                        }
+                    )
+                self._backtest_runs.insert(
+                    0,
+                    {
+                        "id": run_id,
+                        "strategy_name": "Simple Momentum",
+                        "start_date": start.isoformat(),
+                        "end_date": end.isoformat(),
+                        "status": "completed",
+                        "created_at": datetime.now(UTC).isoformat(),
+                        "params": params,
+                        "metrics": metrics,
+                        "sharpe": metrics.get("sharpe_ratio", 0.0),
+                        "win_rate": metrics.get("win_rate", 0.0),
+                        "total_return": metrics.get("total_return", 0.0),
+                        "max_drawdown": metrics.get("max_drawdown", 0.0),
+                        "equity_curve": curve,
+                        "trades": [
+                            {
+                                **t,
+                                "side": t["side"].lower(),
+                                "timestamp_exchange": t["timestamp"].isoformat(),
+                            }
+                            for t in result.trades
+                        ],
+                    },
+                )
                 job.update(status="completed", progress=1.0, run_id=run_id)
             except asyncio.CancelledError:
-                job.update(status="failed", error="Application shutdown interrupted the job")
+                job.update(
+                    status="failed", error="Application shutdown interrupted the job"
+                )
                 raise
             except Exception as exc:
                 job.update(status="failed", error=str(exc))
@@ -664,14 +758,11 @@ def set_api_state(state: APIState) -> None:
     _api_state = state
 
 
-from fastapi import Depends, HTTPException, Security, status
-from fastapi.security import APIKeyHeader
-
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 def verify_api_key(
-    state: APIState = Depends(get_api_state),
+    state: Annotated[APIState, Depends(get_api_state)],
     api_key: str | None = Security(api_key_header),
 ) -> None:
     """Verify API key authentication if configured on APIState."""
@@ -683,4 +774,3 @@ def verify_api_key(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key",
         )
-

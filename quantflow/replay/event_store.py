@@ -57,8 +57,13 @@ class InMemoryEventStoreReader(EventStoreReader):
 
     def _ordered_events(self) -> list[Event]:
         if self._sorted_cache is None:
-            self._sorted_cache = sorted(self._events, key=lambda e: (
-                self._event_timestamp(e), str(getattr(e, "event_id", getattr(e, "id", "")))))
+            self._sorted_cache = sorted(
+                self._events,
+                key=lambda e: (
+                    self._event_timestamp(e),
+                    str(getattr(e, "event_id", getattr(e, "id", ""))),
+                ),
+            )
         return self._sorted_cache
 
     def add_event(self, event: Event) -> None:
@@ -271,7 +276,9 @@ class PostgresEventStoreReader(EventStoreReader):
                             event_id=str(sig.event_id),
                             strategy_id=sig.strategy_name,
                             symbol=sig.symbol,
-                            exchange_id=getattr(sig, "exchange_id", getattr(sig, "exchange", "binance")),
+                            exchange_id=getattr(
+                                sig, "exchange_id", getattr(sig, "exchange", "binance")
+                            ),
                             side=side_val.upper(),
                             quantity=1.0,
                             price=None,
@@ -352,4 +359,3 @@ class SyntheticEventStore(EventStoreReader):
             symbols=symbols,
         ):
             yield ev
-

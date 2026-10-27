@@ -131,12 +131,17 @@ class AnalyticsEngine:
         # A midnight sample closes the preceding UTC day. The initial point is
         # the baseline, not an extra flat trading day.
         initial_ts = self.equity_curve[0][0] if self.equity_curve else ts
-        day = (ts-timedelta(microseconds=1)).date() if ts != initial_ts and ts.time().isoformat() == "00:00:00" else ts.date()
+        day = (
+            (ts - timedelta(microseconds=1)).date()
+            if ts != initial_ts and ts.time().isoformat() == "00:00:00"
+            else ts.date()
+        )
         if self.equity_curve and (ts != initial_ts or equity != self.initial_equity):
             self._daily_equities[day] = equity
         self.last_equity = equity
         self.last_update_day = ts.date().isoformat()
-        self.drawdown_tracker.update(equity)
+        if self.drawdown_tracker is not None:
+            self.drawdown_tracker.update(equity)
         if self.equity_curve and self.equity_curve[-1][0] == ts:
             self.equity_curve[-1] = (ts, equity)
         else:
@@ -153,7 +158,7 @@ class AnalyticsEngine:
         while day <= last:
             current = self._daily_equities.get(day, previous)
             if previous > 0:
-                self._add_daily_return((current-previous)/previous)
+                self._add_daily_return((current - previous) / previous)
             previous = current
             day += timedelta(days=1)
 
@@ -188,8 +193,12 @@ class AnalyticsEngine:
 
         # Record trade if realized PnL was recognized
         if metadata.get("accounted"):
-            if float(metadata.get("closed_quantity", 0.0)) > 0 and metadata.get("trade_complete", True):
-                self.trade_stats.add_trade(float(metadata["closed_trade_pnl"]), slippage, latency)
+            if float(metadata.get("closed_quantity", 0.0)) > 0 and metadata.get(
+                "trade_complete", True
+            ):
+                self.trade_stats.add_trade(
+                    float(metadata["closed_trade_pnl"]), slippage, latency
+                )
         elif abs(realized_pnl) > 1e-12:
             self.trade_stats.add_trade(realized_pnl, slippage, latency)
 
@@ -241,7 +250,11 @@ class AnalyticsEngine:
         mean_ret = self.return_aggregator.mean
         std_ret = self.return_aggregator.stddev()
         downside = self.downside_aggregator
-        downside_std = math.sqrt(max(0.0, downside.m2 / downside.n + downside.mean**2)) if downside.n else 0.0
+        downside_std = (
+            math.sqrt(max(0.0, downside.m2 / downside.n + downside.mean**2))
+            if downside.n
+            else 0.0
+        )
 
         sharpe = calculate_sharpe_ratio(
             mean_return=mean_ret,

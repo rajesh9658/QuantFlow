@@ -497,7 +497,11 @@ class RiskEngine(RiskManager, RiskContext):
 
     async def validate_signal(self, signal: SignalEvent) -> tuple[bool, str | None]:
         """Run all configured checks in sequence."""
-        if signal.side not in {"BUY", "SELL"} or not math.isfinite(signal.quantity) or signal.quantity <= 0:
+        if (
+            signal.side not in {"BUY", "SELL"}
+            or not math.isfinite(signal.quantity)
+            or signal.quantity <= 0
+        ):
             return False, "INVALID_SIGNAL"
         if self.ledger is not None:
             price = signal.price or await self.get_market_price(signal.symbol)
@@ -505,6 +509,7 @@ class RiskEngine(RiskManager, RiskContext):
                 return False, "MISSING_MARKET_PRICE"
             if signal.side == "BUY":
                 from quantflow.execution.fill_simulator import FeeSchedule
+
                 fees = FeeSchedule.from_config(self.config, signal.symbol)
                 cost = signal.quantity * price
                 if cost + fees.calculate_fee(cost) > self.ledger.available_cash + 1e-9:
@@ -516,9 +521,20 @@ class RiskEngine(RiskManager, RiskContext):
         for check in self.checks:
             # A loss/exposure limit blocks new risk, but must not trap existing
             # spot holdings by preventing a sale that reduces the position.
-            if (self.ledger is not None and signal.side == "SELL"
-                    and isinstance(check, (PositionSizeLimitCheck, MaxExposureCheck,
-                                           DailyLossLimitCheck, CircuitBreakerCheck, GlobalHaltCheck))):
+            if (
+                self.ledger is not None
+                and signal.side == "SELL"
+                and isinstance(
+                    check,
+                    (
+                        PositionSizeLimitCheck,
+                        MaxExposureCheck,
+                        DailyLossLimitCheck,
+                        CircuitBreakerCheck,
+                        GlobalHaltCheck,
+                    ),
+                )
+            ):
                 continue
             try:
                 passed, reason = await check.validate(signal, self)
@@ -612,7 +628,11 @@ class RiskEngine(RiskManager, RiskContext):
 
     async def _handle_fill(self, event: FillEvent) -> None:
         if self.ledger is not None:
-            self.positions = {s: p.quantity for s, p in self.ledger.positions.items() if abs(p.quantity) > 1e-12}
+            self.positions = {
+                s: p.quantity
+                for s, p in self.ledger.positions.items()
+                if abs(p.quantity) > 1e-12
+            }
         else:
             side = event.side.upper()
             delta = event.quantity if side == "BUY" else -event.quantity
@@ -626,7 +646,9 @@ class RiskEngine(RiskManager, RiskContext):
                 self.daily_realized_pnl = 0.0
                 self.current_day = today
             self.daily_realized_pnl += event.realized_pnl
-        if float(event.metadata.get("closed_quantity", 0.0)) > 0 and event.metadata.get("trade_complete", True):
+        if float(event.metadata.get("closed_quantity", 0.0)) > 0 and event.metadata.get(
+            "trade_complete", True
+        ):
             self.trade_pnl_history.append(float(event.metadata["closed_trade_pnl"]))
         elif not event.metadata.get("accounted") and event.realized_pnl != 0:
             self.trade_pnl_history.append(event.realized_pnl)

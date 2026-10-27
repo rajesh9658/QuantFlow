@@ -17,6 +17,7 @@ Tests cover:
   - Daily loss reset.
   - Mutation-style spot checks.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,12 +42,21 @@ from quantflow.strategies.momentum.strategy import SimpleMomentumStrategy
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _make_tick(symbol: str = "BTC/USDT", price: float = 50000.0,
-               exchange: str = "binance") -> TickEvent:
-    return TickEvent(symbol=symbol, exchange=exchange, exchange_id=exchange,
-                     bid_price=price - 1, ask_price=price + 1,
-                     bid_size=1.0, ask_size=1.0,
-                     last_price=price, last_size=1.0)
+
+def _make_tick(
+    symbol: str = "BTC/USDT", price: float = 50000.0, exchange: str = "binance"
+) -> TickEvent:
+    return TickEvent(
+        symbol=symbol,
+        exchange=exchange,
+        exchange_id=exchange,
+        bid_price=price - 1,
+        ask_price=price + 1,
+        bid_size=1.0,
+        ask_size=1.0,
+        last_price=price,
+        last_size=1.0,
+    )
 
 
 def _make_clock() -> SimulatedClock:
@@ -55,11 +65,14 @@ def _make_clock() -> SimulatedClock:
 
 # ── CHAOS-1: Orderbook gap triggers resync ───────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_chaos_orderbook_resync_on_ws_kill() -> None:
     snapshots: list[str] = []
+
     async def fake_snap(sym: str) -> None:
         snapshots.append(sym)
+
     book = LocalOrderBook("BTC/USDT", snapshot_callback=fake_snap)
     await book.apply_snapshot([[50000.0, 1.0]], [[50001.0, 1.0]], update_id=100)
     assert book.initialized
@@ -73,16 +86,28 @@ async def test_chaos_orderbook_resync_on_ws_kill() -> None:
 async def test_chaos_no_fill_from_uninitialized_book() -> None:
     from quantflow.common.events import OrderEvent
     from quantflow.execution.fill_simulator import FeeSchedule, simulate_fill
+
     book = LocalOrderBook("BTC/USDT")
-    order = OrderEvent(strategy_id="t", symbol="BTC/USDT", exchange_id="paper",
-                       side="BUY", order_type="MARKET", quantity=1.0)
-    result = simulate_fill(order=order, orderbook_state=book, fee_schedule=FeeSchedule(),
-                           timestamp=datetime(2025, 1, 1, tzinfo=UTC))
+    order = OrderEvent(
+        strategy_id="t",
+        symbol="BTC/USDT",
+        exchange_id="paper",
+        side="BUY",
+        order_type="MARKET",
+        quantity=1.0,
+    )
+    result = simulate_fill(
+        order=order,
+        orderbook_state=book,
+        fee_schedule=FeeSchedule(),
+        timestamp=datetime(2025, 1, 1, tzinfo=UTC),
+    )
     assert len(result.fills) == 0
     assert result.remaining_quantity == 1.0
 
 
 # ── CHAOS-2: Exchange isolation ───────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_chaos_exchange_isolation() -> None:
@@ -106,12 +131,15 @@ async def test_chaos_exchange_isolation() -> None:
 
 # ── CHAOS-3: EventBus flood ───────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_chaos_flood_no_loss_callback_subscriber() -> None:
     bus = AsyncEventBus(default_queue_maxsize=50)
     received: list[TickEvent] = []
+
     async def handler(ev: TickEvent) -> None:
         received.append(ev)
+
     await bus.subscribe(TickEvent, handler)
     N = 500
     for i in range(N):
@@ -120,6 +148,7 @@ async def test_chaos_flood_no_loss_callback_subscriber() -> None:
 
 
 # ── CHAOS-4: Graceful shutdown ────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_chaos_graceful_shutdown_portfolio_unchanged() -> None:
@@ -138,17 +167,21 @@ async def test_chaos_graceful_shutdown_portfolio_unchanged() -> None:
 
 # ── CHAOS-5: Latency measurement (informational) ──────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_chaos_tick_to_signal_latency_sub_millisecond() -> None:
     bus = AsyncEventBus()
-    strategy = SimpleMomentumStrategy(event_bus=bus,
-                                      config={"symbol": "BTC/USDT", "period": 2, "threshold": 0.001})
+    strategy = SimpleMomentumStrategy(
+        event_bus=bus, config={"symbol": "BTC/USDT", "period": 2, "threshold": 0.001}
+    )
     await strategy.initialize()
     signal_ev = asyncio.Event()
     t_signal: list[float] = []
+
     async def cap_signal(ev: SignalEvent) -> None:
         t_signal.append(time.monotonic())
         signal_ev.set()
+
     await bus.subscribe(SignalEvent, cap_signal)
     t_send: list[float] = []
     for p in [50000.0, 50100.0, 50200.0, 50300.0]:
@@ -157,7 +190,7 @@ async def test_chaos_tick_to_signal_latency_sub_millisecond() -> None:
         await bus.publish(_make_tick(price=p))
     try:
         await asyncio.wait_for(signal_ev.wait(), timeout=1.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pytest.skip("No signal in 1s — period warmup pending")
     if t_signal:
         latency_us = (t_signal[0] - t_send[0]) * 1_000_000
@@ -167,31 +200,56 @@ async def test_chaos_tick_to_signal_latency_sub_millisecond() -> None:
 
 # ── PHASE 4: WAC 3 partial fills ─────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_quant_wac_3_fills() -> None:
     portfolio = PortfolioEngine(initial_cash=1_000_000.0)
     for qty, px in [(1.0, 100.0), (2.0, 110.0), (3.0, 120.0)]:
         portfolio.update_position(
-            FillEvent(order_id="o", fill_id=f"f{qty}", symbol="X", side="BUY",
-                      quantity=qty, fill_price=px, exchange="paper")
+            FillEvent(
+                order_id="o",
+                fill_id=f"f{qty}",
+                symbol="X",
+                side="BUY",
+                quantity=qty,
+                fill_price=px,
+                exchange="paper",
+            )
         )
     pos = portfolio.get_position("X")
     assert pos is not None
     assert pos.quantity == 6.0
-    expected = (1*100 + 2*110 + 3*120) / 6
-    assert abs(pos.avg_entry_price - expected) < 1e-6, \
+    expected = (1 * 100 + 2 * 110 + 3 * 120) / 6
+    assert abs(pos.avg_entry_price - expected) < 1e-6, (
         f"WAC expected {expected:.4f}, got {pos.avg_entry_price:.4f}"
+    )
 
 
 @pytest.mark.asyncio
 async def test_quant_partial_close_pnl() -> None:
     portfolio = PortfolioEngine(initial_cash=1_000_000.0)
     portfolio.update_position(
-        FillEvent(order_id="o1", fill_id="f1", symbol="X", side="BUY",
-                  quantity=4.0, fill_price=100.0, exchange="paper"))
+        FillEvent(
+            order_id="o1",
+            fill_id="f1",
+            symbol="X",
+            side="BUY",
+            quantity=4.0,
+            fill_price=100.0,
+            exchange="paper",
+        )
+    )
     portfolio.update_position(
-        FillEvent(order_id="o2", fill_id="f2", symbol="X", side="SELL",
-                  quantity=2.0, fill_price=120.0, exchange="paper"))
+        FillEvent(
+            order_id="o2",
+            fill_id="f2",
+            symbol="X",
+            side="SELL",
+            quantity=2.0,
+            fill_price=120.0,
+            exchange="paper",
+        )
+    )
     pos = portfolio.get_position("X")
     assert pos is not None
     assert pos.quantity == 2.0
@@ -202,11 +260,27 @@ async def test_quant_partial_close_pnl() -> None:
 async def test_quant_position_flip_long_to_short() -> None:
     portfolio = PortfolioEngine(initial_cash=1_000_000.0)
     portfolio.update_position(
-        FillEvent(order_id="o1", fill_id="f1", symbol="X", side="BUY",
-                  quantity=3.0, fill_price=100.0, exchange="paper"))
+        FillEvent(
+            order_id="o1",
+            fill_id="f1",
+            symbol="X",
+            side="BUY",
+            quantity=3.0,
+            fill_price=100.0,
+            exchange="paper",
+        )
+    )
     portfolio.update_position(
-        FillEvent(order_id="o2", fill_id="f2", symbol="X", side="SELL",
-                  quantity=5.0, fill_price=120.0, exchange="paper"))
+        FillEvent(
+            order_id="o2",
+            fill_id="f2",
+            symbol="X",
+            side="SELL",
+            quantity=5.0,
+            fill_price=120.0,
+            exchange="paper",
+        )
+    )
     pos = portfolio.get_position("X")
     assert pos is not None and pos.quantity == -2.0
     assert abs(pos.avg_entry_price - 120.0) < 1e-6
@@ -215,18 +289,29 @@ async def test_quant_position_flip_long_to_short() -> None:
 
 # ── PHASE 4: Fill simulator ───────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_fill_simulator_walks_depth() -> None:
     from quantflow.common.events import OrderEvent
     from quantflow.execution.fill_simulator import FeeSchedule, simulate_fill
+
     book = {"bids": [], "asks": [[50000.0, 1.0], [50100.0, 2.0]]}
-    order = OrderEvent(strategy_id="t", symbol="BTC/USDT", exchange_id="paper",
-                       side="BUY", order_type="MARKET", quantity=3.0)
-    result = simulate_fill(order=order, orderbook_state=book,
-                           fee_schedule=FeeSchedule(taker_rate=0.0),
-                           timestamp=datetime(2025, 1, 1, tzinfo=UTC))
+    order = OrderEvent(
+        strategy_id="t",
+        symbol="BTC/USDT",
+        exchange_id="paper",
+        side="BUY",
+        order_type="MARKET",
+        quantity=3.0,
+    )
+    result = simulate_fill(
+        order=order,
+        orderbook_state=book,
+        fee_schedule=FeeSchedule(taker_rate=0.0),
+        timestamp=datetime(2025, 1, 1, tzinfo=UTC),
+    )
     assert result.remaining_quantity < 1e-9
-    expected = (1*50000 + 2*50100) / 3
+    expected = (1 * 50000 + 2 * 50100) / 3
     assert abs(result.avg_price - expected) < 1e-4
 
 
@@ -234,22 +319,40 @@ async def test_fill_simulator_walks_depth() -> None:
 async def test_fill_never_uses_mid_price() -> None:
     from quantflow.common.events import OrderEvent
     from quantflow.execution.fill_simulator import FeeSchedule, simulate_fill
+
     book = {"bids": [[49990.0, 1.0]], "asks": [[50010.0, 1.0]]}
-    order = OrderEvent(strategy_id="t", symbol="BTC/USDT", exchange_id="paper",
-                       side="BUY", order_type="MARKET", quantity=1.0)
-    result = simulate_fill(order=order, orderbook_state=book,
-                           fee_schedule=FeeSchedule(taker_rate=0.0),
-                           timestamp=datetime(2025, 1, 1, tzinfo=UTC))
+    order = OrderEvent(
+        strategy_id="t",
+        symbol="BTC/USDT",
+        exchange_id="paper",
+        side="BUY",
+        order_type="MARKET",
+        quantity=1.0,
+    )
+    result = simulate_fill(
+        order=order,
+        orderbook_state=book,
+        fee_schedule=FeeSchedule(taker_rate=0.0),
+        timestamp=datetime(2025, 1, 1, tzinfo=UTC),
+    )
     assert result.fills and result.fills[0].fill_price == 50010.0
 
 
 # ── PHASE 4: Idempotency (expected failure — documents bug AUD-009) ───────────
 
+
 @pytest.mark.asyncio
 async def test_quant_idempotency_fill_deduplication() -> None:
     portfolio = PortfolioEngine(initial_cash=1_000_000.0)
-    fill = FillEvent(order_id="o1", fill_id="f1", symbol="X", side="BUY",
-                     quantity=1.0, fill_price=100.0, exchange="paper")
+    fill = FillEvent(
+        order_id="o1",
+        fill_id="f1",
+        symbol="X",
+        side="BUY",
+        quantity=1.0,
+        fill_price=100.0,
+        exchange="paper",
+    )
     portfolio.update_position(fill)
     q1 = portfolio.get_positions().get("X", 0.0)
     portfolio.update_position(fill)  # replay same fill
@@ -259,26 +362,40 @@ async def test_quant_idempotency_fill_deduplication() -> None:
 
 # ── PHASE 4: Look-ahead bias ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_quant_no_lookahead_bias() -> None:
     clock = _make_clock()
     bus = AsyncEventBus(clock=clock)
-    strategy = SimpleMomentumStrategy(event_bus=bus,
-                                      config={"symbol": "BTC/USDT", "period": 2, "threshold": 0.001},
-                                      clock=clock)
+    strategy = SimpleMomentumStrategy(
+        event_bus=bus,
+        config={"symbol": "BTC/USDT", "period": 2, "threshold": 0.001},
+        clock=clock,
+    )
     await strategy.initialize()
     sig_ts: list[datetime] = []
+
     async def cap(ev: SignalEvent) -> None:
         sig_ts.append(ev.timestamp)
+
     await bus.subscribe(SignalEvent, cap)
     last_t = datetime(2025, 1, 1, tzinfo=UTC)
     for i, p in enumerate([50000.0, 50100.0, 50200.0, 50300.0]):
         t = datetime(2025, 1, 1, 0, i, 0, tzinfo=UTC)
         clock.advance_to(t)
         last_t = t
-        tick = TickEvent(symbol="BTC/USDT", exchange="binance", exchange_id="binance",
-                         bid_price=p-1, ask_price=p+1, bid_size=1.0, ask_size=1.0,
-                         last_price=p, last_size=1.0, timestamp=t)
+        tick = TickEvent(
+            symbol="BTC/USDT",
+            exchange="binance",
+            exchange_id="binance",
+            bid_price=p - 1,
+            ask_price=p + 1,
+            bid_size=1.0,
+            ask_size=1.0,
+            last_price=p,
+            last_size=1.0,
+            timestamp=t,
+        )
         await bus.publish(tick)
         await asyncio.sleep(0)
     for ts in sig_ts:
@@ -287,9 +404,11 @@ async def test_quant_no_lookahead_bias() -> None:
 
 # ── PHASE 4: Risk boundaries ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_risk_exactly_at_limit_approved() -> None:
     from quantflow.config.manager import ConfigManager
+
     cfg = ConfigManager(defaults={"risk": {"max_position_qty": 5.0}})
     risk = RiskEngine(config=cfg)
     risk.positions["BTC/USDT"] = 4.0
@@ -301,6 +420,7 @@ async def test_risk_exactly_at_limit_approved() -> None:
 @pytest.mark.asyncio
 async def test_risk_one_over_limit_rejected() -> None:
     from quantflow.config.manager import ConfigManager
+
     cfg = ConfigManager(defaults={"risk": {"max_position_qty": 5.0}})
     risk = RiskEngine(config=cfg)
     risk.positions["BTC/USDT"] = 4.5
@@ -317,10 +437,14 @@ async def test_risk_emergency_stop_blocks_all() -> None:
     await risk.start()
     await risk.set_emergency_stop(True, trigger="audit")
     approved_list: list[Any] = []
+
     async def cap(ev: ApprovedSignalEvent) -> None:
         approved_list.append(ev)
+
     await bus.subscribe(ApprovedSignalEvent, cap)
-    await bus.publish(SignalEvent(strategy_id="t", symbol="BTC/USDT", side="BUY", quantity=1.0))
+    await bus.publish(
+        SignalEvent(strategy_id="t", symbol="BTC/USDT", side="BUY", quantity=1.0)
+    )
     await asyncio.sleep(0)
     assert len(approved_list) == 0
     await risk.stop()
@@ -329,6 +453,7 @@ async def test_risk_emergency_stop_blocks_all() -> None:
 @pytest.mark.asyncio
 async def test_risk_daily_loss_resets_on_new_utc_day() -> None:
     from quantflow.config.manager import ConfigManager
+
     cfg = ConfigManager(defaults={"risk": {"max_daily_loss": 100.0}})
     clock = _make_clock()
     risk = RiskEngine(config=cfg, clock=clock)
@@ -345,9 +470,10 @@ async def test_risk_daily_loss_resets_on_new_utc_day() -> None:
 
 # ── PHASE 5: Mutation spot checks ─────────────────────────────────────────────
 
+
 def test_mutation_wac_division_required() -> None:
-    correct = (1*100 + 2*110 + 3*120) / 6
-    wrong = 1*100 + 2*110 + 3*120  # missing division
+    correct = (1 * 100 + 2 * 110 + 3 * 120) / 6
+    wrong = 1 * 100 + 2 * 110 + 3 * 120  # missing division
     assert abs(correct - 113.333) < 0.001
     assert wrong == 680.0
     assert correct != wrong
@@ -355,10 +481,13 @@ def test_mutation_wac_division_required() -> None:
 
 def test_mutation_fill_sort_order_matters() -> None:
     from quantflow.execution.fill_simulator import _extract_levels
+
     raw = [[50100.0, 1.0], [50000.0, 1.0], [50200.0, 1.0]]
     levels = _extract_levels(raw)
     asc = sorted(levels, key=lambda x: x[0])
     desc = sorted(levels, key=lambda x: x[0], reverse=True)
-    assert asc[0][0] == 50000.0, "Ascending sort gives cheapest ask first (correct for BUY)"
+    assert asc[0][0] == 50000.0, (
+        "Ascending sort gives cheapest ask first (correct for BUY)"
+    )
     assert desc[0][0] == 50200.0, "Descending sort gives wrong fill price"
     assert asc[0][0] != desc[0][0]

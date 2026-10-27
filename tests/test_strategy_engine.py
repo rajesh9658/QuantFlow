@@ -102,7 +102,9 @@ async def test_momentum_buy_signal() -> None:
     """Rising prices beyond threshold → BUY signal."""
     bus = AsyncEventBus()
     q = await bus.subscribe_queue(SignalEvent, maxsize=10)
-    strat = SimpleMomentumStrategy(bus, {"symbol": "BTC/USDT", "period": 5, "threshold": 0.02})
+    strat = SimpleMomentumStrategy(
+        bus, {"symbol": "BTC/USDT", "period": 5, "threshold": 0.02}
+    )
 
     engine = StrategyEngine(bus, {"mom": strat})
     await engine.start()
@@ -127,14 +129,23 @@ async def test_momentum_sell_signal() -> None:
     """Falling prices beyond threshold → SELL signal."""
     bus = AsyncEventBus()
     q = await bus.subscribe_queue(SignalEvent, maxsize=10)
-    strat = SimpleMomentumStrategy(bus, {"symbol": "BTC/USDT", "period": 5, "threshold": 0.02})
+    strat = SimpleMomentumStrategy(
+        bus, {"symbol": "BTC/USDT", "period": 5, "threshold": 0.02}
+    )
 
     engine = StrategyEngine(bus, {"mom": strat})
     await engine.start()
 
     # Feed 6 prices: 100 → 97 (3% drop > 2% threshold)
-    await bus.publish(FillEvent(order_id="prior_buy", symbol="BTC/USDT", side="BUY",
-                               quantity=0.2, fill_price=100.0))
+    await bus.publish(
+        FillEvent(
+            order_id="prior_buy",
+            symbol="BTC/USDT",
+            side="BUY",
+            quantity=0.2,
+            fill_price=100.0,
+        )
+    )
     prices = [100.0, 99.5, 99.0, 98.5, 98.0, 97.0]
     for p in prices:
         await bus.publish(_tick(last=p))
@@ -151,7 +162,9 @@ async def test_momentum_no_signal_in_deadzone() -> None:
     """Prices within threshold → no signal emitted."""
     bus = AsyncEventBus()
     q = await bus.subscribe_queue(SignalEvent, maxsize=10)
-    strat = SimpleMomentumStrategy(bus, {"symbol": "BTC/USDT", "period": 5, "threshold": 0.10})
+    strat = SimpleMomentumStrategy(
+        bus, {"symbol": "BTC/USDT", "period": 5, "threshold": 0.10}
+    )
 
     engine = StrategyEngine(bus, {"mom": strat})
     await engine.start()
@@ -171,7 +184,9 @@ async def test_momentum_no_repeat_signal() -> None:
     """Same direction doesn't re-emit signal."""
     bus = AsyncEventBus()
     q = await bus.subscribe_queue(SignalEvent, maxsize=10)
-    strat = SimpleMomentumStrategy(bus, {"symbol": "BTC/USDT", "period": 3, "threshold": 0.01})
+    strat = SimpleMomentumStrategy(
+        bus, {"symbol": "BTC/USDT", "period": 3, "threshold": 0.01}
+    )
 
     engine = StrategyEngine(bus, {"mom": strat})
     await engine.start()

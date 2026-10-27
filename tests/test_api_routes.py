@@ -14,7 +14,9 @@ from quantflow.config.manager import ConfigManager
 def reset_api_state() -> None:
     """Ensure clean APIState before each test."""
     # Fixture contract checks opt into demo data explicitly.
-    set_api_state(APIState(ConfigManager(defaults={"demo": {"enabled": True}}, env_dict={})))
+    set_api_state(
+        APIState(ConfigManager(defaults={"demo": {"enabled": True}}, env_dict={}))
+    )
 
 
 @pytest.fixture
@@ -302,4 +304,3 @@ def test_api_key_authentication_enforced(client: TestClient) -> None:
     )
     assert resp_ok.status_code == 200
     assert resp_ok.json()["status"] == "activated"
-

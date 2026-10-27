@@ -1,5 +1,10 @@
 # QuantFlow engine audit — 26 October 2026
 
+This report records the state before repairs. Follow-up changes and current
+limitations are documented in [PAPER_RESEARCH.md](PAPER_RESEARCH.md). Original
+execution evidence is preserved in `audit-engine-results.json`; the updated
+reproduction script writes `repair-engine-results.json`.
+
 The current project does not establish a profitable trading strategy. Its dashboard includes fabricated results, its application startup leaves essential engines inactive, and its backtests allow trades far beyond available capital. With US$200, a reliable US$400–$500 monthly withdrawal after Indian taxes is not a realistic planning assumption.
 
 This was an inspection and execution audit, not a repair of the trading engine. Only this report, an offline reproduction script, and its results were added. No exchange connections or live orders were used. Existing .env credentials were not read. The reproduction script explicitly isolates configuration for its paper application startup.
@@ -120,4 +125,4 @@ From the repository root, using the required wrapper:
 rtk proxy .venv\Scripts\python.exe -m scripts.audit_engine
 ```
 
-This overwrites `docs/audit-engine-results.json` with a fresh local diagnostic run. Synthetic prices test implementation behavior only; the observed losses and gains are not a prediction of market performance. The script inspects some private state to document the existing implementation and should be revisited after repairs.
+The current script writes `docs/repair-engine-results.json` with a fresh local diagnostic run and preserves the original results. Synthetic prices test implementation behavior only; observed losses and gains are not a prediction of market performance. The script inspects some private state to document implementation behavior.

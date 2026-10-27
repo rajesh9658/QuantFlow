@@ -181,7 +181,11 @@ class IncrementalAnalyticsCalculator:
         mean_ret = self.return_aggregator.mean
         std_ret = self.return_aggregator.stddev()
         downside = self.downside_aggregator
-        downside_std = max(0.0, downside.m2 / downside.n + downside.mean**2)**0.5 if downside.n else 0.0
+        downside_std = (
+            max(0.0, downside.m2 / downside.n + downside.mean**2) ** 0.5
+            if downside.n
+            else 0.0
+        )
 
         sharpe = calculate_sharpe_ratio(
             mean_return=mean_ret,

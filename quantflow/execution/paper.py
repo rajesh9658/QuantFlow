@@ -114,8 +114,12 @@ class PaperExecutionHandler(ExecutionEngine):
         async with self._lock:
             if order.order_id in self._order_statuses:
                 return  # An order ID is idempotent, including partial fills.
-            if (order.side not in {"BUY", "SELL"} or order.order_type not in {"MARKET", "LIMIT"}
-                    or not math.isfinite(order.quantity) or order.quantity <= 0):
+            if (
+                order.side not in {"BUY", "SELL"}
+                or order.order_type not in {"MARKET", "LIMIT"}
+                or not math.isfinite(order.quantity)
+                or order.quantity <= 0
+            ):
                 raise ValueError("Invalid paper order")
             book = self.order_books.get(order.symbol)
             if not book:
@@ -136,12 +140,36 @@ class PaperExecutionHandler(ExecutionEngine):
             # Enforce a cash spot account even for directly submitted orders.
             held = self.ledger.positions.get(order.symbol)
             inventory = held.quantity if held else 0.0
-            if ((order.side == "BUY" and result.total_cost + result.total_commission > self.ledger.available_cash + 1e-9)
-                    or (order.side == "SELL" and order.quantity > inventory + 1e-12)):
+            if (
+                order.side == "BUY"
+                and result.total_cost + result.total_commission
+                > self.ledger.available_cash + 1e-9
+            ) or (order.side == "SELL" and order.quantity > inventory + 1e-12):
                 self._order_statuses[order.order_id] = "REJECTED"
-                logger.warning("Rejected paper order %s: insufficient cash or inventory", order.order_id)
+                logger.warning(
+                    "Rejected paper order %s: insufficient cash or inventory",
+                    order.order_id,
+                )
                 return
             result.fills = self.ledger.apply_order(result.fills)
+            if result.fills:
+                # Displayed liquidity cannot be reused by another order until
+                # the next market snapshot refreshes it.
+                bids, asks = book.depth(book.max_depth)
+                consumed: dict[float, float] = {}
+                for fill in result.fills:
+                    consumed[fill.fill_price] = (
+                        consumed.get(fill.fill_price, 0.0) + fill.quantity
+                    )
+                if order.side == "BUY":
+                    asks = [(p, max(0.0, q - consumed.get(p, 0.0))) for p, q in asks]
+                else:
+                    bids = [(p, max(0.0, q - consumed.get(p, 0.0))) for p, q in bids]
+                await book.apply_snapshot(
+                    [list(level) for level in bids],
+                    [list(level) for level in asks],
+                    int(now_ts.timestamp() * 1000),
+                )
 
             # Determine order status
             if result.remaining_quantity <= 1e-12:
@@ -289,10 +317,16 @@ class PaperExecutionHandler(ExecutionEngine):
         )
         await self.submit_order(order)
         if self.get_order_status(order.order_id) == "REJECTED" and self.event_bus:
-            await self.event_bus.publish(RejectedSignalEvent(
-                signal_id=event.signal_id, strategy_id=event.strategy_id,
-                symbol=event.symbol, exchange_id=event.exchange_id,
-                reason="EXECUTION_REJECTED", timestamp=self.clock.now()))
+            await self.event_bus.publish(
+                RejectedSignalEvent(
+                    signal_id=event.signal_id,
+                    strategy_id=event.strategy_id,
+                    symbol=event.symbol,
+                    exchange_id=event.exchange_id,
+                    reason="EXECUTION_REJECTED",
+                    timestamp=self.clock.now(),
+                )
+            )
 
     async def _handle_order_event(self, event: OrderEvent) -> None:
         """Process directly received OrderEvent."""

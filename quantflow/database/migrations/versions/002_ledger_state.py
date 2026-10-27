@@ -1,4 +1,5 @@
 """Persist FIFO lots, fees, tax reserves and fill deduplication on recovery."""
+
 import sqlalchemy as sa
 from alembic import op
 

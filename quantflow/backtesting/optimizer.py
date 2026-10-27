@@ -156,7 +156,11 @@ class ParameterSweepRunner:
         max_combinations: int | None = None,
     ) -> SweepResult:
         combinations = expand_grid(param_grid)
-        param_sets = list(itertools.islice(combinations, max_combinations)) if max_combinations else list(combinations)
+        param_sets = (
+            list(itertools.islice(combinations, max_combinations))
+            if max_combinations
+            else list(combinations)
+        )
 
         workers = self.max_workers
         if workers is None:
@@ -213,7 +217,9 @@ def generate_windows(
     - Rolling: training window moves forward by step_days.
     - Anchored: training window always begins at data_start and expands.
     """
-    start_tz = data_start.replace(tzinfo=UTC) if data_start.tzinfo is None else data_start
+    start_tz = (
+        data_start.replace(tzinfo=UTC) if data_start.tzinfo is None else data_start
+    )
     end_tz = data_end.replace(tzinfo=UTC) if data_end.tzinfo is None else data_end
 
     windows: list[Window] = []
@@ -236,7 +242,10 @@ def generate_windows(
         windows.append(Window(train_start, train_end, test_start, test_end))
 
         cursor += timedelta(days=step_days)
-        if not anchored and cursor + timedelta(days=train_span_days + test_span_days) > end_tz:
+        if (
+            not anchored
+            and cursor + timedelta(days=train_span_days + test_span_days) > end_tz
+        ):
             break
         if anchored and train_end + timedelta(days=step_days + test_span_days) > end_tz:
             break
@@ -277,7 +286,9 @@ class WalkForwardValidator:
         data_end: datetime,
     ) -> WalkForwardReport:
         """Run rolling/anchored walk-forward optimization and out-of-sample evaluation."""
-        start_tz = data_start.replace(tzinfo=UTC) if data_start.tzinfo is None else data_start
+        start_tz = (
+            data_start.replace(tzinfo=UTC) if data_start.tzinfo is None else data_start
+        )
         end_tz = data_end.replace(tzinfo=UTC) if data_end.tzinfo is None else data_end
 
         windows = generate_windows(
@@ -482,7 +493,9 @@ def deflated_sharpe_ratio(
     denom = math.sqrt(
         max(
             1e-12,
-            1 - skew * sharpe_obs_per_period + ((kurt - 1) / 4) * sharpe_obs_per_period**2,
+            1
+            - skew * sharpe_obs_per_period
+            + ((kurt - 1) / 4) * sharpe_obs_per_period**2,
         )
     )
     z = (sharpe_obs_per_period - sr0) * math.sqrt(max(1, T - 1)) / denom
@@ -501,13 +514,13 @@ class SignificanceEvaluator:
 
         # ---- Tier 1: Basic Sanity ----
         min_trades = int(cfg.get_int("backtest.significance.min_trades", 30))
-        min_oos_sharpe = float(cfg.get_float("backtest.significance.min_oos_sharpe", 0.0))
+        min_oos_sharpe = float(
+            cfg.get_float("backtest.significance.min_oos_sharpe", 0.0)
+        )
         min_profit_factor = float(
             cfg.get_float("backtest.significance.min_profit_factor", 1.0)
         )
-        max_dd = float(
-            cfg.get_float("backtest.significance.max_drawdown_limit", 0.25)
-        )
+        max_dd = float(cfg.get_float("backtest.significance.max_drawdown_limit", 0.25))
 
         oos = report.aggregate_oos_metrics
         oos_trades = int(oos.get("total_trades", 0))
@@ -539,8 +552,7 @@ class SignificanceEvaluator:
         )
 
         is_sharpes = [
-            float(f.in_sample.metrics.get("sharpe_ratio", 0.0))
-            for f in report.folds
+            float(f.in_sample.metrics.get("sharpe_ratio", 0.0)) for f in report.folds
         ]
         is_sharpe = sum(is_sharpes) / max(len(report.folds), 1)
         degradation = (oos_sharpe / is_sharpe) if is_sharpe > 0 else 0.0
@@ -551,9 +563,7 @@ class SignificanceEvaluator:
             reasons.append(f"T2: Degradation {degradation:.2f} < {min_degradation}")
         if report.walk_forward_efficiency < min_wfe:
             tier2 = False
-            reasons.append(
-                f"T2: WFE {report.walk_forward_efficiency:.2f} < {min_wfe}"
-            )
+            reasons.append(f"T2: WFE {report.walk_forward_efficiency:.2f} < {min_wfe}")
         if report.param_stability < min_stability:
             tier2 = False
             reasons.append(
@@ -590,9 +600,7 @@ class SignificanceEvaluator:
                         cfg.get_float("backtest.significance.assumed_kurtosis", 4.0)
                     ),
                     sharpe_variance_across_trials=var_sr,
-                    n_trials=int(
-                        cfg.get_int("backtest.significance.num_trials", 100)
-                    ),
+                    n_trials=int(cfg.get_int("backtest.significance.num_trials", 100)),
                 )
                 if dsr_value < min_dsr:
                     tier3 = False

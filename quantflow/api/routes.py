@@ -295,7 +295,7 @@ async def get_metrics(
 ) -> AnalyticsMetricsSnapshot:
     """Retrieve overall system analytics snapshot (Sharpe, Sortino, Win Rate, etc.)."""
     metrics = state.get_analytics_metrics()
-    return AnalyticsMetricsSnapshot(**metrics)
+    return AnalyticsMetricsSnapshot.model_validate(metrics)
 
 
 @router.get(
@@ -308,7 +308,7 @@ async def get_metrics_summary(
 ) -> AnalyticsMetricsSnapshot:
     """Retrieve overall system analytics snapshot."""
     metrics = state.get_analytics_metrics()
-    return AnalyticsMetricsSnapshot(**metrics)
+    return AnalyticsMetricsSnapshot.model_validate(metrics)
 
 
 @router.get(
@@ -321,7 +321,10 @@ async def get_strategy_config(
     state: Annotated[APIState, Depends(get_api_state)],
 ) -> StrategyConfigResponse:
     """Retrieve current strategy parameters."""
-    cfg = state.get_strategy_config(name)
+    try:
+        cfg = state.get_strategy_config(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return StrategyConfigResponse(name=name, config=cfg)
 
 
@@ -385,9 +388,7 @@ async def get_exchange_status_by_id(
     """Retrieve status for a specific exchange adapter."""
     item = state.get_exchange_status_by_id(id)
     if not item:
-        raise HTTPException(
-            status_code=404, detail=f"Exchange '{id}' not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Exchange '{id}' not found")
     return ExchangeItem(**item)
 
 
@@ -435,9 +436,7 @@ async def get_backtest_run_detail(
     """Retrieve in-depth backtest report including equity curve and trade logs."""
     run = state.get_backtest_run(id)
     if not run:
-        raise HTTPException(
-            status_code=404, detail=f"Backtest run '{id}' not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Backtest run '{id}' not found")
     return BacktestRunDetailResponse(**run)
 
 
@@ -487,4 +486,3 @@ async def get_backtest_job_status(
 async def get_current_user() -> UserMeResponse:
     """Retrieve current session identity."""
     return UserMeResponse(user_id="dev-trader-1", role="admin")
-

@@ -153,5 +153,3 @@ class RedisStreamEventBus(AsyncEventBus):
                 await self._redis_client.xadd(self.stream_key, data)
             except Exception:
                 pass
-
-

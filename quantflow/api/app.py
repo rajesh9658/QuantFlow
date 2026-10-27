@@ -71,8 +71,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="QuantFlow Trading Platform API",
         description=(
-            "High-performance real-time quantitative trading API "
-            "and WebSocket stream."
+            "High-performance real-time quantitative trading API and WebSocket stream."
         ),
         version="0.1.0",
         lifespan=lifespan,
@@ -141,12 +140,20 @@ def create_app() -> FastAPI:
     @app.get("/ready", tags=["Health"])
     async def readiness() -> JSONResponse:
         ready = bool(getattr(app.state, "pipeline_started", False))
-        return JSONResponse(status_code=200 if ready else 503,
-            content={"ready": ready, "execution_mode": "paper",
-                     "data_source": getattr(app.state, "data_source", "none"),
-                     "market_feed_available": getattr(app.state, "data_source", "none") != "none",
-                     "historical_data_configured": bool(get_api_state().config.get("backtest.data_path")),
-                     "live_trading_supported": False})
+        return JSONResponse(
+            status_code=200 if ready else 503,
+            content={
+                "ready": ready,
+                "execution_mode": "paper",
+                "data_source": getattr(app.state, "data_source", "none"),
+                "market_feed_available": getattr(app.state, "data_source", "none")
+                != "none",
+                "historical_data_configured": bool(
+                    get_api_state().config.get("backtest.data_path")
+                ),
+                "live_trading_supported": False,
+            },
+        )
 
     @app.get("/metrics", tags=["Monitoring"])
     async def prometheus_metrics() -> Response:

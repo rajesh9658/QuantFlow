@@ -53,6 +53,15 @@ class MarketDataProvider(ABC):
 class Strategy(ABC):
     """Abstract interface for trading strategies."""
 
+    enabled: bool = True
+
+    def update_config(self, config: dict[str, Any]) -> None:
+        raise ValueError("This strategy does not support runtime configuration")
+
+    async def stop(self) -> None:
+        """Release subscriptions owned by the strategy, if any."""
+        return None
+
     @abstractmethod
     def get_name(self) -> str:
         """Return the unique name/identifier of the strategy."""
@@ -67,7 +76,7 @@ class Strategy(ABC):
         clock: Any | None = None,
     ) -> None:
         """Initialize the strategy with optional configuration and injected Clock."""
-        pass
+        return None
 
 
 class ExecutionEngine(ABC):

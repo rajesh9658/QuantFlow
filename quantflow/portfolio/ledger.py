@@ -4,6 +4,7 @@ Tax estimates use FIFO acquisition prices, exclude fee deductions, and never
 offset losing disposals against winning disposals. They are research estimates
 in the account quote currency, not an INR tax return or derivative tax model.
 """
+
 from __future__ import annotations
 
 import math
@@ -43,8 +44,13 @@ class AccountLedger:
         if fill.fill_id in self.fills:
             return self.fills[fill.fill_id]
         qty, px, fee = fill.quantity, fill.fill_price, fill.commission
-        if (fill.side not in {"BUY", "SELL"} or not all(map(math.isfinite, (qty, px, fee)))
-                or qty <= 0 or px <= 0 or fee < 0):
+        if (
+            fill.side not in {"BUY", "SELL"}
+            or not all(map(math.isfinite, (qty, px, fee)))
+            or qty <= 0
+            or px <= 0
+            or fee < 0
+        ):
             raise ValueError("Invalid fill")
         pos = self.positions.setdefault(fill.symbol, LedgerPosition())
         old = pos.quantity
@@ -57,7 +63,7 @@ class AccountLedger:
         new = old + delta
         remaining_entry_fee = pos.opening_fees - allocated_entry_fee
         if old * delta >= 0:
-            pos.average = (abs(old)*pos.average + qty*px) / abs(new)
+            pos.average = (abs(old) * pos.average + qty * px) / abs(new)
             pos.opening_fees += fee
         elif old * new > 0:
             pos.opening_fees = remaining_entry_fee
@@ -67,7 +73,7 @@ class AccountLedger:
         else:
             pos.average = pos.opening_fees = 0.0
         pos.quantity = new if abs(new) > 1e-12 else 0.0
-        self.cash += (-qty*px if delta > 0 else qty*px) - fee
+        self.cash += (-qty * px if delta > 0 else qty * px) - fee
         self.total_fees += fee
         self.gross_realized_pnl += gross
 
@@ -81,21 +87,32 @@ class AccountLedger:
             while remaining > 1e-12 and lots:
                 amount, cost = lots[0]
                 used = min(amount, remaining)
-                gain += used * (px-cost)
+                gain += used * (px - cost)
                 lots[0][0] -= used
                 remaining -= used
                 if lots[0][0] <= 1e-12:
                     lots.popleft()
             taxable = max(0.0, gain)
             self.taxable_gains += taxable
-            self.tax_reserve += taxable*self.tax_rate
+            self.tax_reserve += taxable * self.tax_rate
 
-        enriched = fill.model_copy(update={"realized_pnl": gross-fee,
-            "metadata": {**fill.metadata, "accounted": True,
-                "closed_quantity": closed, "closed_trade_pnl": net_closed,
-                "gross_realized_pnl": gross, "taxable_gain": taxable,
-                "tax_gain_before_floor": gain if fill.side == "SELL" and old > 0 else 0.0,
-                "tax_reserve": self.tax_reserve}})
+        enriched = fill.model_copy(
+            update={
+                "realized_pnl": gross - fee,
+                "metadata": {
+                    **fill.metadata,
+                    "accounted": True,
+                    "closed_quantity": closed,
+                    "closed_trade_pnl": net_closed,
+                    "gross_realized_pnl": gross,
+                    "taxable_gain": taxable,
+                    "tax_gain_before_floor": gain
+                    if fill.side == "SELL" and old > 0
+                    else 0.0,
+                    "tax_reserve": self.tax_reserve,
+                },
+            }
+        )
         self.fills[fill.fill_id] = enriched
         return enriched
 
@@ -111,39 +128,75 @@ class AccountLedger:
         accounted = [self.apply(fill) for fill in fills]
         net_closed = sum(f.metadata["closed_trade_pnl"] for f in accounted)
         if fills[0].side == "SELL":
-            taxable = max(0.0, sum(f.metadata["tax_gain_before_floor"] for f in accounted))
+            taxable = max(
+                0.0, sum(f.metadata["tax_gain_before_floor"] for f in accounted)
+            )
             excess = self.taxable_gains - previous_taxable - taxable
             self.taxable_gains -= excess
-            self.tax_reserve -= excess*self.tax_rate
+            self.tax_reserve -= excess * self.tax_rate
             for i, fill in enumerate(accounted):
-                updated = fill.model_copy(update={"metadata": {**fill.metadata,
-                    "taxable_gain": taxable if i == len(accounted)-1 else 0.0,
-                    "tax_reserve": self.tax_reserve}})
+                updated = fill.model_copy(
+                    update={
+                        "metadata": {
+                            **fill.metadata,
+                            "taxable_gain": taxable if i == len(accounted) - 1 else 0.0,
+                            "tax_reserve": self.tax_reserve,
+                        }
+                    }
+                )
                 self.fills[fill.fill_id] = updated
                 accounted[i] = updated
         for i, fill in enumerate(accounted):
-            updated = fill.model_copy(update={"metadata": {**fill.metadata,
-                "trade_complete": i == len(accounted)-1,
-                "closed_trade_pnl": net_closed if i == len(accounted)-1 else fill.metadata["closed_trade_pnl"]}})
+            updated = fill.model_copy(
+                update={
+                    "metadata": {
+                        **fill.metadata,
+                        "trade_complete": i == len(accounted) - 1,
+                        "closed_trade_pnl": net_closed
+                        if i == len(accounted) - 1
+                        else fill.metadata["closed_trade_pnl"],
+                    }
+                }
+            )
             self.fills[fill.fill_id] = updated
             accounted[i] = updated
         return accounted
 
     def snapshot(self) -> dict[str, Any]:
-        return {"version": 1, "initial_cash": self.initial_cash, "cash": self.cash,
-            "tax_rate": self.tax_rate, "tax_reserve": self.tax_reserve,
-            "taxable_gains": self.taxable_gains, "total_fees": self.total_fees,
+        return {
+            "version": 1,
+            "initial_cash": self.initial_cash,
+            "cash": self.cash,
+            "tax_rate": self.tax_rate,
+            "tax_reserve": self.tax_reserve,
+            "taxable_gains": self.taxable_gains,
+            "total_fees": self.total_fees,
             "gross_realized_pnl": self.gross_realized_pnl,
             "positions": {s: asdict(p) for s, p in self.positions.items()},
             "lots": {s: list(lots) for s, lots in self.lots.items()},
-            "fills": {i: f.model_dump(mode="json") for i, f in self.fills.items()}}
+            "fills": {i: f.model_dump(mode="json") for i, f in self.fills.items()},
+        }
 
     def restore(self, snapshot: dict[str, Any]) -> None:
         if snapshot.get("version") != 1:
             raise ValueError("Unsupported ledger snapshot")
-        for key in ("initial_cash", "cash", "tax_rate", "tax_reserve", "taxable_gains",
-                    "total_fees", "gross_realized_pnl"):
+        for key in (
+            "initial_cash",
+            "cash",
+            "tax_rate",
+            "tax_reserve",
+            "taxable_gains",
+            "total_fees",
+            "gross_realized_pnl",
+        ):
             setattr(self, key, float(snapshot[key]))
-        self.positions = {s: LedgerPosition(**p) for s, p in snapshot["positions"].items()}
-        self.lots = {s: deque([list(lot) for lot in lots]) for s, lots in snapshot["lots"].items()}
-        self.fills = {i: FillEvent.model_validate(f) for i, f in snapshot["fills"].items()}
+        self.positions = {
+            s: LedgerPosition(**p) for s, p in snapshot["positions"].items()
+        }
+        self.lots = {
+            s: deque([list(lot) for lot in lots])
+            for s, lots in snapshot["lots"].items()
+        }
+        self.fills = {
+            i: FillEvent.model_validate(f) for i, f in snapshot["fills"].items()
+        }

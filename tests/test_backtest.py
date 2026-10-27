@@ -65,15 +65,27 @@ async def test_single_backtest_run_over_fixture_produces_analytics_report() -> N
     # 50000 -> 50800 (+1.6% over 5 ticks) triggers BUY at tick 5 (ask = 50801.0)
     # 50800 -> 49800 (-1.97% over 5 ticks) triggers SELL at tick 10 (bid = 49799.0)
     prices = [
-        50000.0, 50100.0, 50200.0, 50300.0, 50500.0, 50800.0,
-        50600.0, 50400.0, 50200.0, 50000.0, 49800.0,
-        49800.0, 49800.0,
+        50000.0,
+        50100.0,
+        50200.0,
+        50300.0,
+        50500.0,
+        50800.0,
+        50600.0,
+        50400.0,
+        50200.0,
+        50000.0,
+        49800.0,
+        49800.0,
+        49800.0,
     ]
     ticks = _make_btc_ticks(start, prices)
     end = (ticks[-1].timestamp_received or start) + timedelta(seconds=1)
 
     store = InMemoryEventStoreReader(ticks)
-    engine = BacktestEngine(ConfigManager(defaults={"portfolio": {"initial_cash": 100000.0}}, env_dict={} ))
+    engine = BacktestEngine(
+        ConfigManager(defaults={"portfolio": {"initial_cash": 100000.0}}, env_dict={})
+    )
 
     result: BacktestResult = await engine.run(
         data_reader=store,
@@ -139,14 +151,34 @@ async def test_parameter_sweep_and_rank_by_out_of_sample_performance() -> None:
     # - Config B (threshold=0.05): does not trade In-Sample (zero return), but catches big trend Out-of-Sample.
     is_prices = [
         # Up trend
-        50000.0, 50200.0, 50400.0, 50600.0, 50800.0, 51200.0,
+        50000.0,
+        50200.0,
+        50400.0,
+        50600.0,
+        50800.0,
+        51200.0,
         # Exit higher
-        51200.0, 51300.0, 51400.0, 51500.0, 51600.0, 51800.0,
+        51200.0,
+        51300.0,
+        51400.0,
+        51500.0,
+        51600.0,
+        51800.0,
     ]
     # Out of sample prices: 50000 -> 54000 (big move triggers Config B at 5%)
     oos_prices = [
-        50000.0, 50500.0, 51000.0, 51500.0, 52000.0, 54000.0,
-        54000.0, 53900.0, 53800.0, 53700.0, 53600.0, 52500.0,
+        50000.0,
+        50500.0,
+        51000.0,
+        51500.0,
+        52000.0,
+        54000.0,
+        54000.0,
+        53900.0,
+        53800.0,
+        53700.0,
+        53600.0,
+        52500.0,
     ]
 
     all_ticks: list[TickEvent] = []
@@ -196,7 +228,9 @@ async def test_parameter_sweep_and_rank_by_out_of_sample_performance() -> None:
     ranked_oos = oos_sweep.top_n("total_trades", n=2)
     assert len(ranked_oos) == 2
     # Verify sorted in descending order of total_trades
-    assert ranked_oos[0].metrics["total_trades"] >= ranked_oos[1].metrics["total_trades"]
+    assert (
+        ranked_oos[0].metrics["total_trades"] >= ranked_oos[1].metrics["total_trades"]
+    )
 
 
 def test_walk_forward_split_boundaries_correct_and_non_overlapping() -> None:
@@ -329,12 +363,46 @@ def test_significance_evaluator_tiered_rules() -> None:
     dummy_fold = FoldResult(
         window=Window(datetime.now(), datetime.now(), datetime.now(), datetime.now()),
         best_params={"period": 10},
-        in_sample=BacktestResult({}, datetime.now(), datetime.now(), {"sharpe_ratio": 2.0}, [], [], [], [], 1.0, 10, True),
-        out_of_sample=BacktestResult({}, datetime.now(), datetime.now(), {"sharpe_ratio": 1.5, "profit_factor": 1.5, "max_drawdown": 0.1, "total_trades": 5.0}, [], [], [], [], 1.0, 5, True),
+        in_sample=BacktestResult(
+            {},
+            datetime.now(),
+            datetime.now(),
+            {"sharpe_ratio": 2.0},
+            [],
+            [],
+            [],
+            [],
+            1.0,
+            10,
+            True,
+        ),
+        out_of_sample=BacktestResult(
+            {},
+            datetime.now(),
+            datetime.now(),
+            {
+                "sharpe_ratio": 1.5,
+                "profit_factor": 1.5,
+                "max_drawdown": 0.1,
+                "total_trades": 5.0,
+            },
+            [],
+            [],
+            [],
+            [],
+            1.0,
+            5,
+            True,
+        ),
     )
     report_low_trades = WalkForwardReport(
         folds=[dummy_fold],
-        aggregate_oos_metrics={"sharpe_ratio": 1.5, "profit_factor": 1.5, "max_drawdown": 0.1, "total_trades": 5.0},
+        aggregate_oos_metrics={
+            "sharpe_ratio": 1.5,
+            "profit_factor": 1.5,
+            "max_drawdown": 0.1,
+            "total_trades": 5.0,
+        },
         walk_forward_efficiency=0.75,
         param_stability=0.9,
     )
@@ -348,12 +416,46 @@ def test_significance_evaluator_tiered_rules() -> None:
     dummy_fold_degraded = FoldResult(
         window=Window(datetime.now(), datetime.now(), datetime.now(), datetime.now()),
         best_params={"period": 10},
-        in_sample=BacktestResult({}, datetime.now(), datetime.now(), {"sharpe_ratio": 4.0}, [], [], [], [], 1.0, 50, True),
-        out_of_sample=BacktestResult({}, datetime.now(), datetime.now(), {"sharpe_ratio": 1.0, "profit_factor": 1.5, "max_drawdown": 0.1, "total_trades": 50.0}, [], [], [], [], 1.0, 50, True),
+        in_sample=BacktestResult(
+            {},
+            datetime.now(),
+            datetime.now(),
+            {"sharpe_ratio": 4.0},
+            [],
+            [],
+            [],
+            [],
+            1.0,
+            50,
+            True,
+        ),
+        out_of_sample=BacktestResult(
+            {},
+            datetime.now(),
+            datetime.now(),
+            {
+                "sharpe_ratio": 1.0,
+                "profit_factor": 1.5,
+                "max_drawdown": 0.1,
+                "total_trades": 50.0,
+            },
+            [],
+            [],
+            [],
+            [],
+            1.0,
+            50,
+            True,
+        ),
     )
     report_degraded = WalkForwardReport(
         folds=[dummy_fold_degraded],
-        aggregate_oos_metrics={"sharpe_ratio": 1.0, "profit_factor": 1.5, "max_drawdown": 0.1, "total_trades": 50.0},
+        aggregate_oos_metrics={
+            "sharpe_ratio": 1.0,
+            "profit_factor": 1.5,
+            "max_drawdown": 0.1,
+            "total_trades": 50.0,
+        },
         walk_forward_efficiency=0.25,
         param_stability=0.9,
     )
@@ -367,12 +469,46 @@ def test_significance_evaluator_tiered_rules() -> None:
     dummy_fold_good = FoldResult(
         window=Window(datetime.now(), datetime.now(), datetime.now(), datetime.now()),
         best_params={"period": 10},
-        in_sample=BacktestResult({}, datetime.now(), datetime.now(), {"sharpe_ratio": 2.0}, [], [], [], [], 1.0, 50, True),
-        out_of_sample=BacktestResult({}, datetime.now(), datetime.now(), {"sharpe_ratio": 1.6, "profit_factor": 1.8, "max_drawdown": 0.15, "total_trades": 50.0}, [], [], [], [], 1.0, 50, True),
+        in_sample=BacktestResult(
+            {},
+            datetime.now(),
+            datetime.now(),
+            {"sharpe_ratio": 2.0},
+            [],
+            [],
+            [],
+            [],
+            1.0,
+            50,
+            True,
+        ),
+        out_of_sample=BacktestResult(
+            {},
+            datetime.now(),
+            datetime.now(),
+            {
+                "sharpe_ratio": 1.6,
+                "profit_factor": 1.8,
+                "max_drawdown": 0.15,
+                "total_trades": 50.0,
+            },
+            [],
+            [],
+            [],
+            [],
+            1.0,
+            50,
+            True,
+        ),
     )
     report_good = WalkForwardReport(
         folds=[dummy_fold_good],
-        aggregate_oos_metrics={"sharpe_ratio": 1.6, "profit_factor": 1.8, "max_drawdown": 0.15, "total_trades": 50.0},
+        aggregate_oos_metrics={
+            "sharpe_ratio": 1.6,
+            "profit_factor": 1.8,
+            "max_drawdown": 0.15,
+            "total_trades": 50.0,
+        },
         walk_forward_efficiency=0.8,
         param_stability=0.85,
     )

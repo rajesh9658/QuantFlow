@@ -49,7 +49,9 @@ class DashboardConnection:
                 name, data = await self.outbound.get()
                 await asyncio.wait_for(self.send_event(name, data), timeout=1.0)
         except Exception:
-            logger.warning("Disconnecting slow or failed dashboard client %s", self.session_id)
+            logger.warning(
+                "Disconnecting slow or failed dashboard client %s", self.session_id
+            )
             await self.websocket.close(code=1013)
 
     async def send_event(self, event_name: str, data: Any) -> None:
@@ -239,7 +241,9 @@ class DashboardWebSocketManager:
 
         symbol = getattr(event, "symbol", "")
         now_ms = time.monotonic() * 1000.0
-        if (now_ms - self._last_ticker_broadcast.get(symbol, 0.0)) < self._ticker_throttle_ms:
+        if (
+            now_ms - self._last_ticker_broadcast.get(symbol, 0.0)
+        ) < self._ticker_throttle_ms:
             return
         self._last_ticker_broadcast[symbol] = now_ms
 
@@ -271,10 +275,14 @@ class DashboardWebSocketManager:
 
     async def unsubscribe_from_event_bus(self) -> None:
         if self._event_bus is not None:
-            for event, handler in [(PortfolioUpdateEvent, self.handle_portfolio_event),
-                    (FillEvent, self.handle_fill_event), (SignalEvent, self.handle_signal_event),
-                    (RiskEvent, self.handle_risk_event), (SystemEvent, self.handle_system_event),
-                    (TickEvent, self.handle_tick_event)]:
+            for event, handler in [
+                (PortfolioUpdateEvent, self.handle_portfolio_event),
+                (FillEvent, self.handle_fill_event),
+                (SignalEvent, self.handle_signal_event),
+                (RiskEvent, self.handle_risk_event),
+                (SystemEvent, self.handle_system_event),
+                (TickEvent, self.handle_tick_event),
+            ]:
                 await self._event_bus.unsubscribe(event, handler)
         self._event_bus = None
         self._event_bus_subscribed = False
@@ -325,9 +333,7 @@ async def websocket_endpoint(
             elif action == "unsubscribe":
                 symbols = msg.get("symbols", [])
                 conn.subscribed_symbols.difference_update(symbols)
-                logger.debug(
-                    f"Client {conn.session_id} unsubscribed from {symbols}"
-                )
+                logger.debug(f"Client {conn.session_id} unsubscribed from {symbols}")
 
             else:
                 await conn.send_event(

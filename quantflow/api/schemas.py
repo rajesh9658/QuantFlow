@@ -153,9 +153,7 @@ class RiskConfigResponse(BaseModel):
     max_position_qty: float = 5.0
     max_daily_loss: float = 1000.0
     max_total_exposure: float = 100000.0
-    allowed_symbols: list[str] = Field(
-        default_factory=lambda: ["BTC/USDT", "ETH/USDT"]
-    )
+    allowed_symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT"])
     trading_schedule: str = "00:00-23:59"
 
 
@@ -346,4 +344,3 @@ class UserMeResponse(BaseModel):
     user_id: str
     role: str
     email: str = "trader@quantflow.io"
-

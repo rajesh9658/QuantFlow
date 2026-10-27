@@ -20,8 +20,7 @@ from quantflow.common.events import (
     SignalEvent,
     TickEvent,
 )
-from quantflow.core.event_bus import AsyncEventBus
-from quantflow.core.interfaces import Strategy
+from quantflow.core.interfaces import EventBus, Strategy
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,7 @@ class SimpleMomentumStrategy(Strategy):
 
     def __init__(
         self,
-        event_bus: AsyncEventBus,
+        event_bus: EventBus,
         config: dict[str, Any] | None = None,
         clock: Any | None = None,
     ) -> None:
@@ -49,9 +48,17 @@ class SimpleMomentumStrategy(Strategy):
         self._order_notional = float(cfg.get("order_notional", 20.0))
         self._held = 0.0
         self._pending = False
-        if (self._period < 1 or not math.isfinite(self._threshold) or self._threshold <= 0
-                or not math.isfinite(self._order_notional) or self._order_notional <= 0
-                or (self._quantity is not None and (not math.isfinite(self._quantity) or self._quantity <= 0))):
+        if (
+            self._period < 1
+            or not math.isfinite(self._threshold)
+            or self._threshold <= 0
+            or not math.isfinite(self._order_notional)
+            or self._order_notional <= 0
+            or (
+                self._quantity is not None
+                and (not math.isfinite(self._quantity) or self._quantity <= 0)
+            )
+        ):
             raise ValueError("Momentum period, threshold and size must be positive")
 
         self._prices: deque[float] = deque(maxlen=self._period + 1)
@@ -65,14 +72,28 @@ class SimpleMomentumStrategy(Strategy):
 
     def update_config(self, config: dict[str, Any]) -> None:
         if self._pending or abs(self._held) > 1e-12:
-            raise ValueError("Change strategy parameters only while flat with no pending signal")
+            raise ValueError(
+                "Change strategy parameters only while flat with no pending signal"
+            )
         period = int(config.get("period", self._period))
         threshold = float(config.get("threshold", self._threshold))
         notional = float(config.get("order_notional", self._order_notional))
-        if period < 1 or not math.isfinite(threshold) or threshold <= 0 or not math.isfinite(notional) or notional <= 0:
-            raise ValueError("Strategy period, threshold and order_notional must be positive")
-        self._period, self._threshold, self._order_notional = period, threshold, notional
-        self._prices = deque(maxlen=period+1)
+        if (
+            period < 1
+            or not math.isfinite(threshold)
+            or threshold <= 0
+            or not math.isfinite(notional)
+            or notional <= 0
+        ):
+            raise ValueError(
+                "Strategy period, threshold and order_notional must be positive"
+            )
+        self._period, self._threshold, self._order_notional = (
+            period,
+            threshold,
+            notional,
+        )
+        self._prices = deque(maxlen=period + 1)
         self._last_side = None
 
     async def initialize(
@@ -161,7 +182,11 @@ class SimpleMomentumStrategy(Strategy):
         else:
             return  # inside dead-zone, no signal
 
-        if self._pending or (side == "BUY" and self._held > 1e-12) or (side == "SELL" and self._held <= 1e-12):
+        if (
+            self._pending
+            or (side == "BUY" and self._held > 1e-12)
+            or (side == "SELL" and self._held <= 1e-12)
+        ):
             return
 
         if side == self._last_side:
@@ -175,7 +200,11 @@ class SimpleMomentumStrategy(Strategy):
             "symbol": self._symbol,
             "exchange_id": sig_exchange,
             "side": side,
-            "quantity": (self._quantity or self._order_notional / max(price, event.ask_price)) if side == "BUY" else self._held,
+            "quantity": (
+                self._quantity or self._order_notional / max(price, event.ask_price)
+            )
+            if side == "BUY"
+            else self._held,
             "price": max(price, event.ask_price) if side == "BUY" else event.bid_price,
             "signal_strength": min(abs(ret) / self._threshold, 1.0),
         }

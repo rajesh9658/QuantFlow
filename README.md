@@ -1,5 +1,12 @@
 # QuantFlow
 
+Current execution mode: **cash-spot paper research**. The application loads
+`config/paper.india.yaml` with a $200 research account. Live order submission is
+disabled. Historical profitability is unproven; dashboard backtests require a
+real configured dataset and no longer generate example returns automatically.
+See [paper research setup and tax assumptions](docs/PAPER_RESEARCH.md) and the
+[backtest API contract](docs/BACKTEST_API_CONTRACT.md).
+
 QuantFlow is an async, event-driven quantitative trading, backtesting, and execution framework built with Python 3.12, FastAPI, PostgreSQL, Redis, and a real-time React 18 / Vite 5 trading dashboard.
 
 ---
@@ -65,6 +72,9 @@ bash scripts/check-no-hardcoded.sh
 ---
 
 ## Manual Production Deployment
+
+These deployment steps currently host the paper research interface. Live
+trading remains disabled in this build.
 
 To deploy to your production server:
 

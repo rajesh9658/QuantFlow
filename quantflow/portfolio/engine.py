@@ -25,10 +25,7 @@ from quantflow.portfolio.ledger import AccountLedger
 
 logger = get_logger("portfolio_engine")
 
-PriceProvider = (
-    Callable[[str], Awaitable[float | None]]
-    | Callable[[str], float | None]
-)
+PriceProvider = Callable[[str], Awaitable[float | None]] | Callable[[str], float | None]
 
 
 @dataclass
@@ -106,16 +103,16 @@ class PortfolioEngine(PortfolioManager):
         if initial_cash is not None:
             start_cash = float(initial_cash)
         else:
-            start_cash = float(
-                self.config.get("portfolio.initial_cash", 100000.0)
-            )
+            start_cash = float(self.config.get("portfolio.initial_cash", 100000.0))
 
         self.state = PortfolioState(
             cash=start_cash,
             total_equity=start_cash,
             last_updated=self.clock.now(),
         )
-        self.ledger = ledger or AccountLedger(start_cash, float(self.config.get("tax.rate", 0.0)))
+        self.ledger = ledger or AccountLedger(
+            start_cash, float(self.config.get("tax.rate", 0.0))
+        )
         self._last_prices: dict[str, float] = {}
         self._market_marks: dict[str, float] = {}
         self._seen_fill_ids: set[str] = set()
@@ -139,7 +136,10 @@ class PortfolioEngine(PortfolioManager):
                     port = await port_repo.get(self.portfolio_id)
                     if port is not None:
                         if port.ledger_state is None:
-                            raise RuntimeError("Legacy portfolio has no ledger snapshot; reconcile fills before resuming")
+                            raise RuntimeError(
+                                "Legacy portfolio has no ledger snapshot; "
+                                "reconcile fills before resuming"
+                            )
                         self.ledger.restore(port.ledger_state)
                         self._seen_fill_ids = set(self.ledger.fills)
                         self.state.cash = float(port.cash)
@@ -163,9 +163,7 @@ class PortfolioEngine(PortfolioManager):
 
         if self.event_bus is not None:
             await self.event_bus.subscribe(FillEvent, self.handle_fill)
-        logger.info(
-            "Portfolio Engine started with cash %.2f", self.state.cash
-        )
+        logger.info("Portfolio Engine started with cash %.2f", self.state.cash)
 
     async def stop(self) -> None:
         """Stop the engine and unsubscribe from event bus."""
@@ -183,9 +181,7 @@ class PortfolioEngine(PortfolioManager):
         BUY:  cash -= (price * quantity) + commission
         SELL: cash += (price * quantity) - commission
         """
-        p_fill = float(
-            getattr(fill, "fill_price", getattr(fill, "price", 0.0))
-        )
+        p_fill = float(getattr(fill, "fill_price", getattr(fill, "price", 0.0)))
         q_fill_abs = float(getattr(fill, "quantity", 0.0))
         side = str(getattr(fill, "side", "BUY")).upper()
         commission = float(getattr(fill, "commission", 0.0))
@@ -204,9 +200,7 @@ class PortfolioEngine(PortfolioManager):
         """
         symbol = str(getattr(fill, "symbol", ""))
         side = str(getattr(fill, "side", "BUY")).upper()
-        p_fill = float(
-            getattr(fill, "fill_price", getattr(fill, "price", 0.0))
-        )
+        p_fill = float(getattr(fill, "fill_price", getattr(fill, "price", 0.0)))
         qty = float(getattr(fill, "quantity", 0.0))
         q_fill = qty if side == "BUY" else -qty
 
@@ -275,9 +269,7 @@ class PortfolioEngine(PortfolioManager):
                 avg_entry_price=p_fill,
             )
 
-    async def _get_current_price(
-        self, symbol: str, fallback_price: float
-    ) -> float:
+    async def _get_current_price(self, symbol: str, fallback_price: float) -> float:
         """Resolve current mark price using price_provider or cached price."""
         if self.price_provider is not None:
             try:
@@ -290,9 +282,7 @@ class PortfolioEngine(PortfolioManager):
                     self._last_prices[symbol] = float(val)
                     return float(val)
             except Exception as e:
-                logger.warning(
-                    "Price provider lookup failed for %s: %s", symbol, e
-                )
+                logger.warning("Price provider lookup failed for %s: %s", symbol, e)
 
         return self._last_prices.get(symbol, fallback_price)
 
@@ -306,9 +296,7 @@ class PortfolioEngine(PortfolioManager):
             if pos.is_empty():
                 continue
 
-            current_price = await self._get_current_price(
-                symbol, pos.avg_entry_price
-            )
+            current_price = await self._get_current_price(symbol, pos.avg_entry_price)
             q = pos.quantity
             avg = pos.avg_entry_price
 
@@ -335,9 +323,7 @@ class PortfolioEngine(PortfolioManager):
             if pos.is_empty():
                 continue
 
-            current_price = self._last_prices.get(
-                symbol, pos.avg_entry_price
-            )
+            current_price = self._last_prices.get(symbol, pos.avg_entry_price)
             q = pos.quantity
             avg = pos.avg_entry_price
 
@@ -426,9 +412,7 @@ class PortfolioEngine(PortfolioManager):
 
                 for sym, pos in self.state.positions.items():
                     if not pos.is_empty():
-                        cur_p = self._last_prices.get(
-                            sym, pos.avg_entry_price
-                        )
+                        cur_p = self._last_prices.get(sym, pos.avg_entry_price)
                         upl = (
                             (cur_p - pos.avg_entry_price) * pos.quantity
                             if pos.quantity > 0
@@ -444,7 +428,9 @@ class PortfolioEngine(PortfolioManager):
                         )
                 await session.commit()
         except Exception as e:
-            raise RuntimeError("Portfolio persistence failed; stop processing fills") from e
+            raise RuntimeError(
+                "Portfolio persistence failed; stop processing fills"
+            ) from e
 
     # ── Public Handlers & PortfolioManager API ───────────────────
 
@@ -462,12 +448,19 @@ class PortfolioEngine(PortfolioManager):
     def _apply_accounted_fill(self, fill: FillEvent) -> None:
         self.ledger.apply(fill)
         self.state.cash = self.ledger.cash
-        self.state.realized_pnl = self.ledger.gross_realized_pnl - self.ledger.total_fees
+        self.state.realized_pnl = (
+            self.ledger.gross_realized_pnl - self.ledger.total_fees
+        )
         self.state.positions = {
-            sym: PositionState(symbol=sym, quantity=pos.quantity, avg_entry_price=pos.average)
-            for sym, pos in self.ledger.positions.items() if abs(pos.quantity) > 1e-12
+            sym: PositionState(
+                symbol=sym, quantity=pos.quantity, avg_entry_price=pos.average
+            )
+            for sym, pos in self.ledger.positions.items()
+            if abs(pos.quantity) > 1e-12
         }
-        self._last_prices[fill.symbol] = self._market_marks.get(fill.symbol, fill.fill_price)
+        self._last_prices[fill.symbol] = self._market_marks.get(
+            fill.symbol, fill.fill_price
+        )
 
     async def handle_fill(self, event: FillEvent) -> None:
         """Handle incoming FillEvent with atomic state update & event publication."""

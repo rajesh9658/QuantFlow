@@ -5,7 +5,7 @@
     "fills": [],
     "rejected": [
       {
-        "signal_id": "79d28e13-92fc-4c58-900b-495e0a8d32c6",
+        "signal_id": "61221871-07ce-4e5f-b4b6-f5cb36c3cf4b",
         "reason": "INSUFFICIENT_CASH",
         "timestamp": "2026-01-01 00:00:05+00:00"
       }
@@ -39,46 +39,6 @@
         200.0
       ],
       [
-        "2026-01-01 00:00:01+00:00",
-        200.0
-      ],
-      [
-        "2026-01-01 00:00:02+00:00",
-        200.0
-      ],
-      [
-        "2026-01-01 00:00:03+00:00",
-        200.0
-      ],
-      [
-        "2026-01-01 00:00:04+00:00",
-        200.0
-      ],
-      [
-        "2026-01-01 00:00:05+00:00",
-        200.0
-      ],
-      [
-        "2026-01-01 00:00:06+00:00",
-        200.0
-      ],
-      [
-        "2026-01-01 00:00:07+00:00",
-        200.0
-      ],
-      [
-        "2026-01-01 00:00:08+00:00",
-        200.0
-      ],
-      [
-        "2026-01-01 00:00:09+00:00",
-        200.0
-      ],
-      [
-        "2026-01-01 00:00:10+00:00",
-        200.0
-      ],
-      [
         "2026-01-01 00:00:11+00:00",
         200.0
       ]
@@ -87,32 +47,8 @@
   "cash_and_risk": {
     "snapshots": [
       {
-        "cash": 200.0,
-        "equity": 200.0
-      },
-      {
-        "cash": 200.0,
-        "equity": 200.0
-      },
-      {
-        "cash": 200.0,
-        "equity": 200.0
-      },
-      {
-        "cash": 200.0,
-        "equity": 200.0
-      },
-      {
-        "cash": 200.0,
-        "equity": 200.0
-      },
-      {
-        "cash": 200.0,
-        "equity": 200.0
-      },
-      {
         "cash": 179.98,
-        "equity": 199.98
+        "equity": 199.97960630696247
       },
       {
         "cash": 179.98,
@@ -150,16 +86,16 @@
     "equity_after_explicit_mark": 200.45203795200882
   },
   "subscriber_failure": "handler RuntimeError propagated to caller",
-  "publish_50_slow_False_seconds": 0.0004222000716254115,
-  "publish_50_slow_True_seconds": 0.9653516999678686,
+  "publish_50_slow_False_seconds": 0.00013960001524537802,
+  "publish_50_slow_True_seconds": 0.9064939999952912,
   "daily_return": {
     "expected": 0.1,
     "observed_mean": 0.1
   },
   "replay_benchmark": {
     "input_ticks": 10000,
-    "wall_seconds": 1.7664485999848694,
-    "ticks_per_second": 5661.076127596159,
+    "wall_seconds": 0.24088999989908189,
+    "ticks_per_second": 41512.723667189945,
     "reported_event_count": 10000,
     "success": true
   },
@@ -168,7 +104,7 @@
     "health_body": {
       "status": "ok",
       "version": "0.1.0",
-      "started_at": "2026-10-26T17:40:38.942790+00:00",
+      "started_at": "2026-10-26T18:02:09.491689+00:00",
       "execution_mode": "paper",
       "demo_fixtures": false,
       "data_source": "none"

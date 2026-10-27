@@ -211,11 +211,7 @@ class ExecutionRepository(BaseRepository):
         """Persist a fill execution."""
         f_uid = _to_uuid(fill_id)
         o_uid = _to_uuid(order_id)
-        ts_ex = (
-            timestamp_exchange
-            if timestamp_exchange is not None
-            else self._now()
-        )
+        ts_ex = timestamp_exchange if timestamp_exchange is not None else self._now()
         rec_at = received_at if received_at is not None else self._now()
 
         execution = Execution(
@@ -234,18 +230,14 @@ class ExecutionRepository(BaseRepository):
         await self.session.flush()
         return execution
 
-    async def get_by_fill_id(
-        self, fill_id: uuid.UUID | str
-    ) -> Execution | None:
+    async def get_by_fill_id(self, fill_id: uuid.UUID | str) -> Execution | None:
         """Fetch execution by fill UUID."""
         uid = _to_uuid(fill_id)
         stmt = select(Execution).where(Execution.fill_id == uid)
         res = await self.session.execute(stmt)
         return res.scalar_one_or_none()
 
-    async def get_fills_for_order(
-        self, order_id: uuid.UUID | str
-    ) -> list[Execution]:
+    async def get_fills_for_order(self, order_id: uuid.UUID | str) -> list[Execution]:
         """Fetch all fills associated with an order ID."""
         uid = _to_uuid(order_id)
         stmt = (
@@ -263,9 +255,7 @@ class ExecutionRepository(BaseRepository):
 class PositionRepository(BaseRepository):
     """Repository for Position aggregate state."""
 
-    async def get(
-        self, portfolio_id: str, symbol: str
-    ) -> Position | None:
+    async def get(self, portfolio_id: str, symbol: str) -> Position | None:
         """Fetch position by portfolio ID and symbol."""
         stmt = select(Position).where(
             Position.portfolio_id == portfolio_id, Position.symbol == symbol
@@ -273,9 +263,7 @@ class PositionRepository(BaseRepository):
         res = await self.session.execute(stmt)
         return res.scalar_one_or_none()
 
-    async def get_all(
-        self, portfolio_id: str = "quantflow_main"
-    ) -> list[Position]:
+    async def get_all(self, portfolio_id: str = "quantflow_main") -> list[Position]:
         """Fetch all positions for a given portfolio ID."""
         stmt = select(Position).where(Position.portfolio_id == portfolio_id)
         res = await self.session.execute(stmt)
@@ -330,13 +318,9 @@ class PositionRepository(BaseRepository):
 class PortfolioRepository(BaseRepository):
     """Repository for Portfolio financial summary state."""
 
-    async def get(
-        self, portfolio_id: str = "quantflow_main"
-    ) -> Portfolio | None:
+    async def get(self, portfolio_id: str = "quantflow_main") -> Portfolio | None:
         """Fetch portfolio snapshot by portfolio ID."""
-        stmt = select(Portfolio).where(
-            Portfolio.portfolio_id == portfolio_id
-        )
+        stmt = select(Portfolio).where(Portfolio.portfolio_id == portfolio_id)
         res = await self.session.execute(stmt)
         return res.scalar_one_or_none()
 
@@ -410,9 +394,7 @@ class TickerRepository(BaseRepository):
         await self.session.flush()
         return ticker
 
-    async def create_batch(
-        self, tickers_data: list[dict[str, Any]]
-    ) -> list[Ticker]:
+    async def create_batch(self, tickers_data: list[dict[str, Any]]) -> list[Ticker]:
         """Bulk insert ticker records."""
         instances: list[Ticker] = []
         for item in tickers_data:
@@ -540,9 +522,7 @@ class SignalRepository(BaseRepository):
         await self.session.flush()
         return sig
 
-    async def get_by_event_id(
-        self, event_id: uuid.UUID | str
-    ) -> Signal | None:
+    async def get_by_event_id(self, event_id: uuid.UUID | str) -> Signal | None:
         """Fetch signal by event UUID."""
         uid = _to_uuid(event_id)
         stmt = select(Signal).where(Signal.event_id == uid)

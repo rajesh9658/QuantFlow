@@ -23,7 +23,10 @@ class FeeSchedule:
     flat_fee_per_order: float = 0.0
 
     def __post_init__(self) -> None:
-        if any(not math.isfinite(v) or v < 0 for v in (self.taker_rate, self.maker_rate, self.flat_fee_per_order)):
+        if any(
+            not math.isfinite(v) or v < 0
+            for v in (self.taker_rate, self.maker_rate, self.flat_fee_per_order)
+        ):
             raise ValueError("Fee rates and flat fees must be finite and nonnegative")
 
     def calculate_fee(self, notional: float, is_maker: bool = False) -> float:
@@ -193,9 +196,7 @@ def simulate_fill(
     else:
         levels = sorted(bids_levels, key=lambda x: x[0], reverse=True)
         is_limit = order_type == "LIMIT" and limit_price is not None
-        price_limit = (
-            limit_price if is_limit and limit_price is not None else 0.0
-        )
+        price_limit = limit_price if is_limit and limit_price is not None else 0.0
 
     remaining = max(0.0, quantity)
     fills: list[FillEvent] = []
@@ -233,8 +234,10 @@ def simulate_fill(
             exchange="paper",
             timestamp=ts,
             timestamp_exchange=ts,
-            metadata={"strategy_id": getattr(order, "strategy_id", ""),
-                      "order_exchange_id": getattr(order, "exchange_id", "paper")},
+            metadata={
+                "strategy_id": getattr(order, "strategy_id", ""),
+                "order_exchange_id": getattr(order, "exchange_id", "paper"),
+            },
         )
         fills.append(fill_event)
 

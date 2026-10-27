@@ -39,9 +39,19 @@ class BatchAnalyticsCalculator:
         from quantflow.analytics.engine import AnalyticsEngine
         from quantflow.config.manager import ConfigManager
         from quantflow.core.event_bus import InMemoryEventBus
-        engine = AnalyticsEngine(ConfigManager(defaults={"analytics": {
-            "risk_free_rate": self.risk_free_rate, "annualization_factor": self.annualization_factor}}, env_dict={}),
-            InMemoryEventBus())
+
+        engine = AnalyticsEngine(
+            ConfigManager(
+                defaults={
+                    "analytics": {
+                        "risk_free_rate": self.risk_free_rate,
+                        "annualization_factor": self.annualization_factor,
+                    }
+                },
+                env_dict={},
+            ),
+            InMemoryEventBus(),
+        )
         engine.load_historical_equity(list(equity_curve))
         if trades:
             engine.load_historical_trades(list(trades))
